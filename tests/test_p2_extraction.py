@@ -332,13 +332,15 @@ def test_an_unpriced_model_is_flagged_rather_than_reported_as_free():
     """A missing price must not look like a confident $0.00.
 
     Model names churn, so a configured model that this build has no rate for
-    would otherwise understate spend without saying so.
+    would otherwise understate spend without saying so. The estimate is `None`
+    and `cost_status` names the reason, rather than a fabricated zero.
     """
     tracker = CostTracker()
     tracker.record("extract", input_tokens=1_000_000, output_tokens=0)
     report = tracker.stage_report("extract", "some-model-released-tomorrow")
-    assert report["estimated_usd"] == 0.0
+    assert report["estimated_usd"] is None
     assert report["model_priced"] is False
+    assert report["cost_status"] == "unpriced_model"
 
     # A genuinely free model is still priced, and says so.
     assert tracker.stage_report("extract", "gemini-embedding-001")["model_priced"] is True

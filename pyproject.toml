@@ -16,6 +16,11 @@ dependencies = [
 
 [project.optional-dependencies]
 tui = ["textual>=0.70"]
+# Optional provider-routing backend. Imported lazily by llm/litellm_backend.py, so
+# the default install keeps 7 runtime deps and the direct Gemini path never loads it.
+# Costs 16 transitive deps (boto3, tiktoken, aiohttp, openai, ...) when enabled; see
+# docs/adr/0002-litellm-as-optional-extra.md
+router = ["litellm>=1.103,<2"]
 fulltext = ["pymupdf>=1.24"]
 dev = [
     "pytest>=8.2",

@@ -33,6 +33,7 @@ async def expand_title(
     llm: LLMClient,
     into: list[str],
     count: int = DEFAULT_QUERY_COUNT,
+    model: str = "",
 ) -> AsyncIterator[Event]:
     """Generate 3-5 sub-topic queries, falling back to the raw title on failure.
 
@@ -49,7 +50,10 @@ async def expand_title(
     queries: list[str] = []
     try:
         result = await llm.generate_structured(
-            QUERY_EXPANSION.format(title=title, n=count), QuerySet, stage="query_expansion"
+            QUERY_EXPANSION.format(title=title, n=count),
+            QuerySet,
+            stage="query_expansion",
+            model=model or None,
         )
         queries = [q.strip() for q in result.queries if q and q.strip()]
     except LLMError as exc:

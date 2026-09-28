@@ -112,13 +112,48 @@ async def test_a_throttled_call_is_retried_and_then_succeeds(
 async def test_retries_are_bounded_and_then_reported(
     instant_backoff,
 ):
+    """An exhausted retry budget reports the attempt count and keeps the category.
+
+    The category is the part that matters now: the raised error is the normalised
+    `ProviderRateLimited`, not a bare `LLMError`. Wrapping the last failure in a
+    plain LLMError would discard the 429 and downgrade it to UNKNOWN, which the
+    router then refuses to fall back from -- silently disabling failover for
+    exactly the transient faults it exists to handle.
+    """
+    from rla.llm.errors import ErrorCategory, ProviderRateLimited
+
     def always_throttled():
         raise Status(429, "still throttled")
 
-    with pytest.raises(LLMError, match="after 3 attempts"):
+    with pytest.raises(ProviderRateLimited) as excinfo:
         await call_with_retry(
             always_throttled, stage="extraction", limiter=RateLimiter(0.0), max_retries=3
         )
+
+    assert excinfo.value.category is ErrorCategory.RATE_LIMITED
+    assert "still throttled" in str(excinfo.value)
+    assert "3" in str(excinfo.value), "the attempt count should still be reported"
+
+
+async def test_an_exhausted_5xx_keeps_its_server_error_category(instant_backoff):
+    """A 503 that exhausts its retries must remain fallback-eligible.
+
+    This is the case that motivated the change: the router falls back on
+    SERVER_ERROR but not on UNKNOWN, so a lost category here would quietly turn
+    provider failover off.
+    """
+    from rla.llm.errors import ProviderServerError
+
+    def always_overloaded():
+        raise Status(503, "overloaded")
+
+    with pytest.raises(ProviderServerError) as excinfo:
+        await call_with_retry(
+            always_overloaded, stage="extraction", limiter=RateLimiter(0.0), max_retries=2
+        )
+
+    assert excinfo.value.fallback_eligible is True
+    assert excinfo.value.retryable is True
 
 
 async def test_a_permanent_error_is_not_retried_at_all(

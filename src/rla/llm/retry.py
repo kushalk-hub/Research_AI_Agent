@@ -34,7 +34,9 @@ _RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
 #: hitting `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, 20 requests per
 #: day per model. Pacing cannot help there, so these raise at once instead of
 #: burning five attempts against a bucket that resets in hours.
-_DAILY_QUOTA_MARKERS = ("perday", "per_day", "per-day")
+#:
+#: The marker list itself now lives in `llm/error_map`, shared with the router's
+#: classification so the two can never disagree about what counts as a daily cap.
 
 
 def is_daily_quota(exc: BaseException) -> bool:
@@ -44,11 +46,17 @@ def is_daily_quota(exc: BaseException) -> bool:
     the run in seconds rather than holding a worker for five 38-second waits per
     paper, which is how one 20-paper batch previously burned 15 minutes to
     extract nothing.
+
+    The load-bearing signal is the `quotaId` in the body, which Gemini names
+    `GenerateRequestsPerDayPerProjectPerModel-FreeTier`. Do not be tempted to
+    treat a short "please retry in Ns" hint as evidence of a per-minute bucket:
+    a real captured per-day 429 carries both, and trusting the hint turns every
+    daily-cap failure into three pointless retries before the same terminal
+    error.
     """
-    text = str(exc).lower()
-    if "resource_exhausted" not in text and "429" not in text:
-        return False
-    return any(marker in text for marker in _DAILY_QUOTA_MARKERS)
+    from rla.llm.error_map import _looks_like_period_quota
+
+    return _looks_like_period_quota(exc)
 
 
 def quota_summary(exc: BaseException) -> str:
@@ -220,12 +228,19 @@ async def call_with_retry(
     max_retries: int = 5,
     retryable: Callable[[BaseException], bool] = is_retryable,
     spender: Spender | None = None,
+    timeout: float | None = None,
 ) -> Any:
     """Run a blocking SDK call off-thread, pacing and retrying as needed.
 
     `spender` is charged once per attempt that actually leaves the process, not
     once per logical call, because a retried request is a second metered
     request. Cached calls never reach here and so are never charged.
+
+    `timeout` bounds a single attempt. The audit found that no provider call had
+    any bound at all: `request_timeout_seconds` only ever applied to the academic
+    source HTTP calls, so a hung provider connection could block a stage
+    indefinitely. A timeout is treated as retryable and, once normalised,
+    becomes the `TIMEOUT` category -- which the router may fall back from.
     """
     pace = limiter or get_limiter()
     last: BaseException | None = None
@@ -234,6 +249,8 @@ async def call_with_retry(
             await spender.acquire(stage)
         await pace.acquire()
         try:
+            if timeout and timeout > 0:
+                return await asyncio.wait_for(asyncio.to_thread(fn), timeout)
             return await asyncio.to_thread(fn)
         except Exception as exc:  # SDK raises a broad family of errors
             if not retryable(exc):
@@ -250,7 +267,21 @@ async def call_with_retry(
             last = exc
             if attempt < max_retries - 1:
                 await asyncio.sleep(retry_delay(exc, attempt))
-    raise LLMError(f"{stage}: still failing after {max_retries} attempts: {last}") from last
+
+    # Retries exhausted. The final error must PRESERVE the category of the last
+    # real failure: wrapping it in a bare LLMError would discard the status code
+    # and downgrade a 503 to UNKNOWN, which the router then refuses to fall back
+    # from. That would make the retry layer silently disable failover.
+    from rla.llm.error_map import normalize
+
+    summary = f"still failing after {max_retries} attempts: {' '.join(str(last).split())}"
+    if last is None:
+        raise LLMError(f"{stage}: {summary}")
+    error = normalize(last, stage=stage)
+    # Keep the attempt count in the message: without it a long stall reports only
+    # the provider's own text, which reads like a single failed call.
+    error.args = (f"{stage}: {summary}",)
+    raise error from last
 
 
 __all__ = [

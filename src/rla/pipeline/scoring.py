@@ -69,12 +69,19 @@ def _batch_prompt(papers: list[Paper], title: str) -> str:
 
 
 async def _score_batch(
-    papers: list[Paper], title: str, llm: LLMClient, semaphore: asyncio.Semaphore
+    papers: list[Paper],
+    title: str,
+    llm: LLMClient,
+    semaphore: asyncio.Semaphore,
+    model: str = "",
 ) -> tuple[list[ScoreEntry], Exception | None]:
     async with semaphore:
         try:
             result = await llm.generate_structured(
-                _batch_prompt(papers, title), ScoreSet, stage="relevance_scoring"
+                _batch_prompt(papers, title),
+                ScoreSet,
+                stage="relevance_scoring",
+                model=model or None,
             )
         except (LLMError, RuntimeError) as exc:
             return [], exc
@@ -94,6 +101,7 @@ async def score_papers(
     title: str,
     llm: LLMClient,
     concurrency: int = 4,
+    model: str = "",
 ) -> AsyncIterator[Event]:
     """Assign `relevance_score` to every paper. Unscored papers default to 3.
 
@@ -106,7 +114,9 @@ async def score_papers(
 
     batches = [papers[i : i + BATCH_SIZE] for i in range(0, len(papers), BATCH_SIZE)]
     semaphore = asyncio.Semaphore(concurrency)
-    results = await asyncio.gather(*(_score_batch(b, title, llm, semaphore) for b in batches))
+    results = await asyncio.gather(
+        *(_score_batch(b, title, llm, semaphore, model) for b in batches)
+    )
 
     assigned: dict[str, int] = {}
     failures = [error for _, error in results if error is not None]

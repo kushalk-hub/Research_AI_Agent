@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-28T10:11:50+00:00",
-  "corpus_papers": 63,
-  "extracted_papers": 26,
-  "held_out_papers": 37,
+  "generated_at": "2026-09-28T18:27:49+00:00",
+  "corpus_papers": 100,
+  "extracted_papers": 0,
+  "held_out_papers": 100,
   "graph": {
-    "nodes": 90,
-    "edges": 35
+    "nodes": 206,
+    "edges": 323
   },
   "reference": {
     "set": "p8-reference",
@@ -62,23 +62,23 @@
     {
       "dimension": "citation_validity",
       "judge_kind": "heuristic",
-      "graph": 1.0,
+      "graph": null,
       "rag": null,
       "delta": null,
       "favours": "not comparable",
-      "graph_coverage": 1.0,
-      "rag_coverage": 0.917,
+      "graph_coverage": 0.0,
+      "rag_coverage": 0.0,
       "mechanical": true
     },
     {
       "dimension": "citation_support",
       "judge_kind": "heuristic",
-      "graph": 1.0,
+      "graph": null,
       "rag": null,
       "delta": null,
       "favours": "not comparable",
-      "graph_coverage": 1.0,
-      "rag_coverage": 0.917,
+      "graph_coverage": 0.0,
+      "rag_coverage": 0.0,
       "mechanical": true
     },
     {
@@ -95,237 +95,13 @@
   ],
   "gap_validity": {
     "summary": {
-      "gaps": 6,
-      "confirmed": 1,
-      "refuted": 5,
+      "gaps": 0,
+      "confirmed": 0,
+      "refuted": 0,
       "no_signal": 0,
-      "not_testable": 0,
-      "testable": 6,
-      "refuted_rate": 0.8333333333333334
+      "not_testable": 0
     },
-    "verdicts": [
-      {
-        "concept": "Digital Twin",
-        "first_seen_year": 2023,
-        "verdict": "refuted",
-        "favourable": false,
-        "held_out_considered": 37,
-        "skipped_not_later": 17,
-        "matches": [
-          {
-            "paper_id": "c127126c51f8e2b79eb63fbce6c9f4a14a9f5039",
-            "title": "Integration of Decentralized Graph-Based Multi-Agent Reinforcement Learning with Digital Twin for Traffic Signal Optimization",
-            "year": 2024,
-            "score": 11.275
-          }
-        ],
-        "note": "1 later held-out paper(s) work on this concept, so it was not understudied once the held-out papers are allowed in. This counts against the gap analysis."
-      },
-      {
-        "concept": "Digital Twin Edge Network",
-        "first_seen_year": 2023,
-        "verdict": "refuted",
-        "favourable": false,
-        "held_out_considered": 37,
-        "skipped_not_later": 17,
-        "matches": [
-          {
-            "paper_id": "c127126c51f8e2b79eb63fbce6c9f4a14a9f5039",
-            "title": "Integration of Decentralized Graph-Based Multi-Agent Reinforcement Learning with Digital Twin for Traffic Signal Optimization",
-            "year": 2024,
-            "score": 12.574
-          },
-          {
-            "paper_id": "arxiv:2401.09886v2",
-            "title": "Cooperative Edge Caching Based on Elastic Federated and Multi-Agent Deep Reinforcement Learning in Next-Generation Network",
-            "year": 2024,
-            "score": 5.056
-          },
-          {
-            "paper_id": "9814b54537c244aed60200721e3f86ad541bd744",
-            "title": "Transformer-GAT Assisted MADDPG for Task Offloading and Resource Allocation in Multi-UAV Mobile Edge Computing",
-            "year": 2026,
-            "score": 4.889
-          },
-          {
-            "paper_id": "arxiv:2407.02342v1",
-            "title": "Optimizing Age of Information in Vehicular Edge Computing with Federated Graph Neural Network Multi-Agent Reinforcement Learning",
-            "year": 2024,
-            "score": 4.662
-          },
-          {
-            "paper_id": "doi:10.1016/j.asoc.2025.114277",
-            "title": "A multi-agent reinforcement learning with multi-task learning and graph edge attention networks for dynamic flexible job shop scheduling",
-            "year": 2026,
-            "score": 3.968
-          }
-        ],
-        "note": "5 later held-out paper(s) work on this concept, so it was not understudied once the held-out papers are allowed in. This counts against the gap analysis."
-      },
-      {
-        "concept": "Graph Attention Networks",
-        "first_seen_year": 2023,
-        "verdict": "refuted",
-        "favourable": false,
-        "held_out_considered": 37,
-        "skipped_not_later": 17,
-        "matches": [
-          {
-            "paper_id": "doi:10.1021/acssynbio.4c00864.s001",
-            "title": "Enhanced Integration of Single-Cell Multi-Omics Data Using Graph Attention Networks",
-            "year": 2025,
-            "score": 5.118
-          },
-          {
-            "paper_id": "doi:10.2139/ssrn.5110456",
-            "title": "Multi-Class Traffic Assignment Using Multi-View Heterogeneous Graph Attention Networks",
-            "year": 2025,
-            "score": 5.118
-          },
-          {
-            "paper_id": "doi:10.1016/j.asoc.2025.114277",
-            "title": "A multi-agent reinforcement learning with multi-task learning and graph edge attention networks for dynamic flexible job shop scheduling",
-            "year": 2026,
-            "score": 4.894
-          },
-          {
-            "paper_id": "960f3ddd371d6e87fe00f8faf524b8ef3426218f",
-            "title": "Graph Attention Network-Based QMIX for Coordinated Multi-Agent Traffic Signal Control",
-            "year": 2025,
-            "score": 4.38
-          },
-          {
-            "paper_id": "77da7a0836f3c169860085f2978fe349ea8d20f7",
-            "title": "Multi-agent Collaborative Decision-making Mechanism Combining Reinforcement Learning and Graph Attention Network",
-            "year": 2025,
-            "score": 3.863
-          },
-          {
-            "paper_id": "c43c632c9e1fa3a989cdcd4e0c04138ee3ead6a5",
-            "title": "Learning Autonomous Defense Strategies via Multi-Agent Graph Neural Networks in Dynamic Networked Environments",
-            "year": 2025,
-            "score": 3.782
-          },
-          {
-            "paper_id": "doi:10.14711/thesis-hdl152361",
-            "title": "Simulation of Supply Chain Networks with Graph-Based Multi-Agent Systems for Education",
-            "year": 2025,
-            "score": 3.27
-          },
-          {
-            "paper_id": "615c42c9b9cd976a18ccf3f605a44860b502558a",
-            "title": "Graph-Attention and Multi-Agent Reinforcement Learning for Truck Transportation Scheme Optimization in Steel Procurement Logistics",
-            "year": 2026,
-            "score": 3.131
-          },
-          {
-            "paper_id": "c1081568dbf104c0e52785d908321a6da13ddbeb",
-            "title": "MacLight: Multi-scene Aggregation Convolutional Learning for Traffic Signal Control",
-            "year": 2025,
-            "score": 3.058
-          }
-        ],
-        "note": "9 later held-out paper(s) work on this concept, so it was not understudied once the held-out papers are allowed in. This counts against the gap analysis."
-      },
-      {
-        "concept": "Graph Attention-based Multi-Agent Reinforcement Learning",
-        "first_seen_year": 2023,
-        "verdict": "refuted",
-        "favourable": false,
-        "held_out_considered": 37,
-        "skipped_not_later": 17,
-        "matches": [
-          {
-            "paper_id": "doi:10.1016/j.asoc.2025.114277",
-            "title": "A multi-agent reinforcement learning with multi-task learning and graph edge attention networks for dynamic flexible job shop scheduling",
-            "year": 2026,
-            "score": 4.36
-          },
-          {
-            "paper_id": "615c42c9b9cd976a18ccf3f605a44860b502558a",
-            "title": "Graph-Attention and Multi-Agent Reinforcement Learning for Truck Transportation Scheme Optimization in Steel Procurement Logistics",
-            "year": 2026,
-            "score": 4.032
-          },
-          {
-            "paper_id": "77da7a0836f3c169860085f2978fe349ea8d20f7",
-            "title": "Multi-agent Collaborative Decision-making Mechanism Combining Reinforcement Learning and Graph Attention Network",
-            "year": 2025,
-            "score": 3.972
-          },
-          {
-            "paper_id": "doi:10.2139/ssrn.5110456",
-            "title": "Multi-Class Traffic Assignment Using Multi-View Heterogeneous Graph Attention Networks",
-            "year": 2025,
-            "score": 3.525
-          },
-          {
-            "paper_id": "doi:10.1021/acssynbio.4c00864.s001",
-            "title": "Enhanced Integration of Single-Cell Multi-Omics Data Using Graph Attention Networks",
-            "year": 2025,
-            "score": 3.522
-          },
-          {
-            "paper_id": "960f3ddd371d6e87fe00f8faf524b8ef3426218f",
-            "title": "Graph Attention Network-Based QMIX for Coordinated Multi-Agent Traffic Signal Control",
-            "year": 2025,
-            "score": 3.456
-          },
-          {
-            "paper_id": "c43c632c9e1fa3a989cdcd4e0c04138ee3ead6a5",
-            "title": "Learning Autonomous Defense Strategies via Multi-Agent Graph Neural Networks in Dynamic Networked Environments",
-            "year": 2025,
-            "score": 3.213
-          }
-        ],
-        "note": "7 later held-out paper(s) work on this concept, so it was not understudied once the held-out papers are allowed in. This counts against the gap analysis."
-      },
-      {
-        "concept": "Mobile Edge Computing",
-        "first_seen_year": 2023,
-        "verdict": "refuted",
-        "favourable": false,
-        "held_out_considered": 37,
-        "skipped_not_later": 17,
-        "matches": [
-          {
-            "paper_id": "9814b54537c244aed60200721e3f86ad541bd744",
-            "title": "Transformer-GAT Assisted MADDPG for Task Offloading and Resource Allocation in Multi-UAV Mobile Edge Computing",
-            "year": 2026,
-            "score": 14.203
-          },
-          {
-            "paper_id": "arxiv:2407.02342v1",
-            "title": "Optimizing Age of Information in Vehicular Edge Computing with Federated Graph Neural Network Multi-Agent Reinforcement Learning",
-            "year": 2024,
-            "score": 6.8
-          },
-          {
-            "paper_id": "doi:10.1016/j.asoc.2025.114277",
-            "title": "A multi-agent reinforcement learning with multi-task learning and graph edge attention networks for dynamic flexible job shop scheduling",
-            "year": 2026,
-            "score": 3.968
-          },
-          {
-            "paper_id": "arxiv:2401.09886v2",
-            "title": "Cooperative Edge Caching Based on Elastic Federated and Multi-Agent Deep Reinforcement Learning in Next-Generation Network",
-            "year": 2024,
-            "score": 3.373
-          }
-        ],
-        "note": "4 later held-out paper(s) work on this concept, so it was not understudied once the held-out papers are allowed in. This counts against the gap analysis."
-      },
-      {
-        "concept": "Multi-Agent Reinforcement Learning",
-        "first_seen_year": 2023,
-        "verdict": "confirmed",
-        "favourable": true,
-        "held_out_considered": 37,
-        "skipped_not_later": 17,
-        "matches": [],
-        "note": "no held-out paper from after 2023 matched at score >= 3.0. The gap is confirmed: no later paper engages the concept, so it remains understudied."
-      }
-    ]
+    "verdicts": []
   },
   "limitations": [
     "Node/edge precision and recall are NOT reported. The reference set is not hand-labelled, so a number computed against it would measure the generator against itself. See the reference-set section.",

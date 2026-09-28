@@ -100,22 +100,80 @@ def test_cost_tracker_totals_and_stage_breakdown():
     assert report["estimated_usd"] > 0
 
 
-def test_cost_estimate_is_zero_for_unknown_model():
-    assert CostTracker().estimate_usd("some-unknown-model") == 0.0
+def test_cost_estimate_is_unknown_not_zero_for_unpriced_model():
+    """An unpriced model must report "unknown", never a confident $0.00.
+
+    A zero here is indistinguishable from a model that genuinely costs nothing,
+    so a model whose price this build does not know would silently understate
+    spend. `None` plus `unpriced_model` is the honest answer.
+    """
+    tracker = CostTracker()
+    tracker.record("extract", 1_000_000, 1_000_000)
+    assert tracker.estimate_usd("some-unknown-model") is None
+    report = tracker.to_dict("some-unknown-model")
+    assert report["estimated_usd"] is None
+    assert report["cost_status"] == "unpriced_model"
+    assert report["model_priced"] is False
+
+
+def test_cost_estimate_survives_a_provider_prefix():
+    """A `provider/model` routing string must price as the bare model id.
+
+    LiteLLM routes on `gemini/gemini-2.5-flash`; the direct backend uses
+    `gemini-2.5-flash`. Both mean the same model and must not differ in price.
+    """
+    tracker = CostTracker()
+    tracker.record("extract", 1_000_000, 0)
+    assert tracker.estimate_usd("gemini/gemini-2.5-flash") == tracker.estimate_usd(
+        "gemini-2.5-flash"
+    )
+
+
+def test_flash_lite_is_not_priced_as_flash():
+    """Regression: substring pricing matched 'flash' inside 'flash-lite'.
+
+    The old lookup iterated the pricing table in insertion order and used
+    `key in model`, so the cheap model inherited the full model's rate -- a 3x
+    overcharge on input, on the model that does most of the work.
+    """
+    from rla.store.cache import price_for
+
+    assert price_for("gemini-2.5-flash-lite") == (0.10, 0.40)
+    assert price_for("gemini-2.5-flash") == (0.30, 2.50)
+    assert price_for("gemini-2.5-flash-lite") != price_for("gemini-2.5-flash")
+
+
+def test_unknown_usage_is_reported_as_unknown_not_zero():
+    """A provider that omits usage must not make the run look free.
+
+    One unmeasurable call poisons the aggregate, because the true total is
+    genuinely not knowable. Reporting 0 instead would make a provider swap that
+    broke usage parsing look like a cost *reduction*.
+    """
+    tracker = CostTracker()
+    tracker.record("extract", 100, 20)
+    tracker.record("extract", None, None)
+    report = tracker.to_dict("gemini-2.5-flash")
+    assert report["input_tokens"] is None
+    assert report["estimated_usd"] is None
+    assert report["cost_status"] == "unknown_usage"
+    assert report["unknown_usage_calls"] == 1
+    assert report["calls"] == 2  # both calls still counted
 
 
 async def test_rate_limiter_serialises_calls():
     import time
 
-    limiter = RateLimiter(0.01)
+    limiter = RateLimiter(0.05)
     start = time.monotonic()
     for _ in range(3):
         await limiter.acquire()
     elapsed = time.monotonic() - start
-    # Two gaps of 10ms. Allow a millisecond of slack: clock granularity on
-    # Windows is coarser than the 15.6ms timer quantum, so the exact boundary
-    # is not a stable thing to assert on.
-    assert elapsed >= 0.019, f"limiter only enforced {elapsed:.4f}s"
+    # Two gaps of 50ms. The window is deliberately far larger than the Windows
+    # 15.6ms timer quantum: the previous 10ms setting asked for a 19ms floor,
+    # which is inside the scheduler's own slack and failed roughly 40% of runs on
+    # this machine -- a flaky assertion that says nothing about the limiter.
+    assert elapsed >= 0.09, f"limiter only enforced {elapsed:.4f}s"
 
 
 def test_prompt_hash_tracks_prompt_text():

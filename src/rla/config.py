@@ -6,6 +6,7 @@ keyless sources (spec section 3a) rather than failing when a paid key is absent.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
 
@@ -35,9 +36,68 @@ class Settings(BaseSettings):
     #: text-embedding-004 was retired and now 404s; this is the GA replacement.
     embedding_model: str = "gemini-embedding-001"
 
+    #: --- Provider routing -------------------------------------------------
+    #: `gemini` uses the native SDK directly (no LiteLLM import). `litellm` routes
+    #: through the optional [router] extra. Both satisfy the same LLMClient
+    #: Protocol, so this is a config change and never a code change.
+    llm_provider: str = "gemini"
+    #: Model for the four structured stages (query expansion, relevance scoring,
+    #: extraction, resolution). Separate from `fast_model` because those stages
+    #: dominate request volume: a 100-paper corpus is ~100 extraction calls, which
+    #: is five days of the fast model's free-tier daily allowance. Defaulting to
+    #: `fast_model` keeps that affordable and is now honoured explicitly rather
+    #: than by accident (the previous code accepted `strong_model` and discarded
+    #: it, so extraction silently ran on the cheap model anyway).
+    structured_model: str = ""
+    #: Model for streamed answer generation, where quality is user-visible and
+    #: volume is one call per question.
+    answer_model: str = ""
+    #: Ordered fallback models, tried only on recoverable transport faults.
+    fallback_models: str = "gemini-2.5-flash"
+    #: Quota exhaustion is a capacity condition, not a fault, so failing over
+    #: spends a second model's budget on a first model's ceiling. Off unless the
+    #: operator explicitly wants that trade. See ADR-004.
+    fallback_on_quota: bool = False
+    #: Bound a single provider attempt. Previously no provider call had any
+    #: bound: `request_timeout_seconds` only ever applied to source HTTP.
+    llm_timeout_seconds: float = Field(default=120.0, gt=0.0)
+
     # --- Optional sources --------------------------------------------------
     serpapi_api_key: str = ""
     core_api_key: str = ""
+
+    # --- Second LLM provider -----------------------------------------------
+    #: Credential for the secondary LLM provider. Named for the PROVIDER, not for
+    #: the routing role: credentials belong to providers, and a provider can be
+    #: promoted to primary later, at which point a `FALLBACK_API_KEY` name would
+    #: be actively misleading. Optional -- the pipeline runs on the primary alone
+    #: when this is blank.
+    openai_api_key: str = Field(
+        default="",
+        validation_alias="OPENAI_API_KEY",
+        description="Optional second LLM provider credential, for cross-provider failover.",
+    )
+
+    # --- Provider endpoints -------------------------------------------------
+    #: Per-provider base URL overrides, as a JSON object keyed by the SAME provider
+    #: prefix used in model strings (`gemini/...`, `openai/...`, `openrouter/...`).
+    #:
+    #: Deliberately a map and not a single URL. Cross-provider routing means two
+    #: providers are live at once, and they must not share an endpoint: pointing
+    #: Gemini and a local vLLM at the same base URL would silently break the primary.
+    #:
+    #: A map is also the only shape that supports an arbitrary provider -- an
+    #: OpenAI-compatible gateway, a proxy, or a self-hosted endpoint -- without a
+    #: code change per provider. Entries are optional; an absent key means
+    #: "use the provider's default endpoint".
+    #:
+    #: Example:
+    #:   RLA_LLM_BASE_URLS={"openrouter": "https://openrouter.ai/api/v1",
+    #:                     "local": "http://localhost:8000/v1"}
+    llm_base_urls: str = Field(
+        default="",
+        description="JSON object of provider prefix -> base URL, e.g. '{\"openrouter\": \"...\"}'.",
+    )
 
     # --- Optional phase 2: full text ---------------------------------------
     unpaywall_email: str = ""
@@ -111,9 +171,103 @@ class Settings(BaseSettings):
     def graph_graphml(self) -> Path:
         return self.graph_dir / "graph.graphml"
 
+    # --- Base URL overrides ------------------------------------------------
+    # Methods live after the field block on purpose. Pydantic collects fields by
+    # scanning class-level annotations, so a method interleaved among them silently
+    # terminates field collection and every later annotated attribute becomes an
+    # ordinary class variable instead of a setting.
+
+    def base_url_for(self, model: str) -> str | None:
+        """Resolve the base URL override for a model's provider, if any.
+
+        The provider is taken from the `provider/model` prefix that LiteLLM routes
+        on. A model with no prefix is assumed to be the primary provider, since
+        that is how the direct-backend ids are written. Returns None when no
+        override is configured, which means "use the provider default" -- an
+        explicit distinction from an override pointing at an empty string.
+        """
+        override = self.parsed_base_urls()
+        if not override:
+            return None
+        if "/" in model:
+            prefix = model.split("/", 1)[0]
+        else:
+            prefix = self.primary_provider_prefix
+        return override.get(prefix)
+
+    @property
+    def primary_provider_prefix(self) -> str:
+        """Provider prefix for a bare (unprefixed) model id.
+
+        A bare id like `gemini-2.5-flash` is a Google model, so an override keyed
+        `gemini` applies to it. Without this, per-provider overrides would silently
+        not apply to exactly the model strings the project defaults to.
+        """
+        model = self.model_for_structured
+        if "/" in model:
+            return model.split("/", 1)[0]
+        return "gemini" if model.startswith("gemini") else model
+
+    def parsed_base_urls(self) -> dict[str, str]:
+        """Parse `llm_base_urls`, tolerating anything malformed.
+
+        A typo in this optional convenience setting must not stop the pipeline, so
+        bad input yields an empty map. Ignoring it silently would be worse than
+        failing loudly, so a warning is emitted once per distinct bad value.
+        """
+        raw = (self.llm_base_urls or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            _warn_once(
+                f"RLA_LLM_BASE_URLS is not valid JSON ({exc}); ignoring the override. "
+                "Expected a JSON object like '{\"openrouter\": \"https://...\"}'."
+            )
+            return {}
+        if not isinstance(parsed, dict):
+            _warn_once(
+                "RLA_LLM_BASE_URLS must be a JSON object of provider -> url, "
+                f"got {type(parsed).__name__}; ignoring the override."
+            )
+            return {}
+        return {str(k): str(v) for k, v in parsed.items() if v}
+
     def ensure_dirs(self) -> None:
         for path in (self.data_dir, self.raw_dir, self.graph_dir):
             path.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def model_for_structured(self) -> str:
+        """Model for the four schema-constrained stages."""
+        return self.structured_model or self.fast_model
+
+    @property
+    def model_for_answer(self) -> str:
+        """Model for streamed answer generation."""
+        return self.answer_model or self.strong_model
+
+    @property
+    def configured_fallbacks(self) -> list[str]:
+        """Fallback models exactly as configured, in order, de-duplicated."""
+        raw = [m.strip() for m in self.fallback_models.split(",") if m.strip()]
+        return list(dict.fromkeys(raw))
+
+    def fallback_chain_for(self, model: str) -> list[str]:
+        """Fallbacks available to a specific primary model.
+
+        Only the model being asked about is excluded. Excluding the answer-stage
+        primary as well would leave the structured stages -- the bulk of the call
+        volume -- with nothing to fail over to, since the two primaries are
+        sibling models and the structured primary is the cheaper one.
+        """
+        return [m for m in self.configured_fallbacks if m != model]
+
+    @property
+    def fallback_chain(self) -> list[str]:
+        """Fallbacks available to the structured primary (the bulk of calls)."""
+        return self.fallback_chain_for(self.model_for_structured)
 
     def enabled_sources(self) -> list[str]:
         """Keyless sources are always on; SerpApi only when a key is present."""
@@ -121,6 +275,24 @@ class Settings(BaseSettings):
         if self.serpapi_api_key:
             sources.append("serpapi")
         return sources
+
+
+_WARNED: set[str] = set()
+
+
+def _warn_once(message: str) -> None:
+    """Emit a configuration warning once, without a logging dependency.
+
+    `config.py` is imported by every entrypoint including `rla doctor --help`, so
+    it deliberately sets up no logging. A malformed optional setting is worth
+    saying out loud once rather than being silently ignored.
+    """
+    if message in _WARNED:
+        return
+    _WARNED.add(message)
+    import sys
+
+    print(f"warning: {message}", file=sys.stderr)
 
 
 @lru_cache(maxsize=1)

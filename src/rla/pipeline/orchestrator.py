@@ -291,7 +291,7 @@ class Pipeline:
             yield evt
 
     async def _run_resolution(self, result: PipelineResult) -> AsyncIterator[Event]:
-        from rla.llm.embeddings import Embedder
+        from rla.llm.factory import build_embedder
         from rla.pipeline.resolve import resolve_concepts
         from rla.store.extraction_store import ExtractionStore
 
@@ -304,11 +304,7 @@ class Pipeline:
             )
             return
 
-        embedder = (
-            Embedder(self.settings, self.cache, self.tracker)
-            if self.settings.gemini_api_key
-            else None
-        )
+        embedder = build_embedder(self.settings, self.cache, self.tracker)
         years = (
             {p.id: p.year for p in result.corpus.papers if p.year}
             if result.corpus is not None

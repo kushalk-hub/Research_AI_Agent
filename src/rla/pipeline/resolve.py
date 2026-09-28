@@ -28,7 +28,9 @@ from pydantic import BaseModel, Field
 
 from rla.events import Event, Phase, event
 from rla.llm.base import LLMClient, LLMError
-from rla.llm.embeddings import Embedder, cosine
+from rla.llm.embedding_base import cosine
+from rla.llm.embeddings import Embedder
+from rla.llm.errors import ProviderError
 from rla.llm.prompts.templates import CONCEPT_RESOLUTION
 from rla.models import Concept, Extraction
 from rla.store.cache import CostTracker
@@ -208,13 +210,18 @@ async def _judge(
     b_desc: str,
     llm: LLMClient,
     semaphore: asyncio.Semaphore,
+    model: str = "",
 ) -> tuple[Verdict | None, Exception | None]:
     async with semaphore:
         try:
+            # Forwarded for the same reason as extraction: the audit found this
+            # stage accepted `model` and only used it to label a cost report, so
+            # the configured judge model never actually judged anything.
             verdict = await llm.generate_structured(
                 CONCEPT_RESOLUTION.format(a=a, a_desc=a_desc, b=b, b_desc=b_desc),
                 Verdict,
                 stage=STAGE,
+                model=model or None,
             )
         except (LLMError, ValueError) as exc:
             return None, exc
@@ -281,7 +288,10 @@ async def resolve_concepts(
         yield event(Phase.RESOLVE, f"Embedding {len(texts)} concept names", kind="ok")
         try:
             vectors = await embedder.embed_many([g[0].centroid_text() for g in clusters])
-        except LLMError as exc:
+        except (LLMError, ProviderError) as exc:
+            # Losing embeddings degrades to name-only resolution: fewer merges, but
+            # never a wrong one. Every embedding failure is fatal *to this
+            # capability* and none of them are reasons to abandon the run.
             yield event(
                 Phase.RESOLVE,
                 f"embedding failed ({_reason(exc)}); keeping name-only resolution",
@@ -316,6 +326,7 @@ async def resolve_concepts(
                 _describe(clusters[j]),
                 llm,
                 semaphore,
+                model,
             )
             if verdict is None:
                 # No verdict means no merge: the safe direction to fail in.

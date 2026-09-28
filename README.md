@@ -1,165 +1,280 @@
-# FODS_CP - Graph-Based Research Literature Agent
+# rla — Graph-Based Research Literature Agent
 
-## Environment Setup
+Ingests papers on a research topic, builds a citation-and-concept graph, and traverses
+that graph to answer lineage questions ("how did technique X evolve?") and gap questions
+("what's still unsolved in Y?") with traceable citations.
 
-### Prerequisites
-- Python 3.12+
-- `.venv` virtual environment (already configured)
+---
 
-### Activate the Environment
+## Setup
+
+**Requires Python 3.11+.** This project was built and verified on 3.12.
+
 ```powershell
-# From the project root (FODS_CP)
-.\.venv\Scripts\activate.ps1
+# 1. create the environment
+py -3.12 -m venv .venv
+
+# 2. install (this creates the `rla` command)
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,tui]"
+
+# 3. add your API key — see "API keys" below
+Copy-Item .env.example .env
 ```
 
-### Install Dependencies
-```powershell
-pip install -e .
-```
+Activate it if you prefer: `.\.venv\Scripts\Activate.ps1`
+Otherwise prefix commands with `.\.venv\Scripts\`.
 
-### Verify Installation
+> **Note:** `python -m src.rla.cli` does **not** work. This is a src-layout package and
+> the import name is `rla`. Use the `rla` command, or
+> `$env:PYTHONPATH="src"; python -m rla.cli` if you have not installed.
+
+### Verify
+
 ```powershell
-python -c "import rla; print('rla imported successfully')"
+rla doctor          # config, sources, cache — no API key needed
+rla doctor --llm    # live check of every configured model (spends a few requests)
 ```
 
 ---
 
-## How to Run It
+## API keys
 
-### 1. Run the Evaluation (P8 Gate)
+**One key, in `.env`.** Add it under `GEMINI_API_KEY`:
+
+```dotenv
+GEMINI_API_KEY=your-key-here
+```
+
+Get one from [Google AI Studio](https://aistudio.google.com/apikey).
+
+- **Without a key** the pipeline still works. It acquires a corpus from the keyless
+  sources (Semantic Scholar, OpenAlex, arXiv, DBLP, CrossRef) and skips the LLM stages.
+  `rla build` and `rla report` are useful with no key at all.
+- **With a key** you additionally get query expansion, relevance scoring, concept
+  extraction, entity resolution, and answer generation.
+- `.env` is gitignored. `.env.example` is the committed template — never put a real key
+  in it.
+- Use an **AI Studio API key**, not `gcloud auth print-access-token` output. An OAuth
+  token returns `401` on every call and `rla doctor --llm` will say so.
+
+Other optional keys, all documented in `.env.example`: `RLA_SERPAPI_API_KEY` (adds a
+Google Scholar pass for recent preprints), `RLA_UNPAYWALL_EMAIL`, `RLA_NEO4J_*`.
+
+---
+
+## Choosing a provider (LiteLLM routing)
+
+The application talks to one interface, `LLMClient`. Underneath, you can use the **native
+Google SDK** or route through **LiteLLM**. One env var switches between them — no code
+change.
+
+```dotenv
+# native Google SDK (default, no extra install)
+RLA_LLM_PROVIDER=gemini
+
+# route through LiteLLM
+RLA_LLM_PROVIDER=litellm
+```
+
+### Enabling LiteLLM
+
+LiteLLM is an **optional extra**, so the default install stays small:
+
 ```powershell
-python -m src.rla.cli eval
+.\.venv\Scripts\python.exe -m pip install -e ".[router]"
 ```
 
-**What you get:**
-- `data/eval/report.md` - Markdown report with comparison table and gap validity
-- `data/eval/results.json` - Structured JSON output
+It still uses the **same `GEMINI_API_KEY`**. LiteLLM does not need a separate key — it
+reads the standard variable for whichever provider you route to. For a second provider
+(e.g. OpenAI) you would add that provider's own key to `.env`.
 
-**Honest results you'll see:**
-```
-corpus 63 papers | extracted 26 | held out 37
-graph 90 nodes / 35 edges | 12 questions | judge: heuristic
+### Which model runs each stage
 
-Retrieved-evidence comparison (mean over questions)
-dimension              graph   rag   delta  favours
-citation_validity      1.000       -       -  not comparable
-citation_support       1.000       -       -  not comparable
-completeness               -       -       -  not comparable (judged)
+| Setting | Used for | Default |
+|---|---|---|
+| `RLA_FAST_MODEL` | generic fallback | `gemini-2.5-flash-lite` |
+| `RLA_STRUCTURED_MODEL` | the 4 schema-constrained stages | falls back to `fast_model` |
+| `RLA_ANSWER_MODEL` | streamed answer generation | falls back to `strong_model` |
+| `RLA_EMBEDDING_MODEL` | concept embeddings | `gemini-embedding-001` |
+| `RLA_FALLBACK_MODELS` | comma-separated fallbacks, in order | `gemini-2.5-flash` |
 
-Gap validity against held-out papers
-6 gap(s): 5 refuted, 1 confirmed, 0 no signal, 0 not testable
-refuted rate over testable gaps: 83% (higher means the gap analysis is doing worse)
+**The free tier allows ~20 requests per model per day.** A 100-paper corpus needs ~100
+extraction calls, so keep `RLA_STRUCTURED_MODEL` on the cheap model unless you have a paid
+key. The fallback chain exists because quota is **per model** — when the fast model's
+allowance is spent, the fallback model may still have budget.
 
-  [refuted] Digital Twin                2024 (11.3) ...
-  [refuted] Graph Attention Networks      2025 (5.1) ...
-  [refuted] Mobile Edge Computing         2026 (14.2) ...
-  [confirmed] Multi-Agent Reinforcement Learning
+### Fallback behaviour
 
-Extraction accuracy
-  NOT MEASURED
-  - reference set 'p8-reference' has 0% hand-labelled items
+Fallback triggers only on recoverable faults: timeout, per-minute 429, 5xx, network error.
+It does **not** trigger on invalid credentials, malformed config, unsupported schema, or
+programming errors — retrying those across models just multiplies the cost of a one-line
+fix.
 
-Limitations of this run
-  - Node/edge precision and recall are NOT reported. The reference set is not hand-labelled.
-  - No LLM judge ran: the Gemini free tier is a per-model daily cap and it is spent.
-  - The two arms never surfaced the same paper for any question.
-  - The baseline is retrieval-only. It does not generate an answer.
+Daily-quota exhaustion is treated as a capacity condition, not a fault, so it raises
+rather than failing over (preserving the other model's budget). Opt in with:
+
+```dotenv
+RLA_FALLBACK_ON_QUOTA=true
 ```
 
-### 2. Run the Textual TUI (P7)
+A model is only used for a structured stage if it supports schema-constrained output;
+otherwise the router refuses it rather than silently degrading to unvalidated JSON.
+
+### Per-provider base URLs
+
+Point any provider at an alternative endpoint — an OpenAI-compatible gateway, a proxy, or
+a self-hosted server — without touching code:
+
+```dotenv
+RLA_LLM_BASE_URLS={"openai": "http://localhost:8000/v1", "openrouter": "https://openrouter.ai/api/v1"}
+```
+
+Keyed by the **same provider prefix** used in model strings, so
+`openrouter/meta/llama-3` picks up the `openrouter` entry.
+
+**The prefix must be a provider LiteLLM actually recognises** — `openai`, `openrouter`,
+`groq`, `gemini`, `anthropic`. An invented name like `local` is rejected with
+`LLM Provider NOT provided` before any request goes out. To reach a custom
+OpenAI-compatible server, declare it *as* `openai` and override the endpoint:
+
+```dotenv
+RLA_LLM_BASE_URLS={"openai": "http://localhost:8000/v1"}
+RLA_FALLBACK_MODELS=openai/my-model
+```
+
+The credential sent is the one that provider reads, so the entry above sends
+`OPENAI_API_KEY` to your server.
+
+It is a **map, not a single URL**, deliberately. During cross-provider failover two
+providers are live at once, and a shared endpoint would silently break the primary.
+
+Entries are optional: an absent key means "use the provider's default endpoint", which is
+what you want for `openrouter` and `groq` since LiteLLM already knows those URLs. A bare
+model id (`gemini-2.5-flash`) is treated as the primary provider, so a `gemini` key applies
+to the project's default model strings. Malformed JSON is ignored with a warning rather than
+stopping the pipeline.
+
+Applies to the **LiteLLM path only** — the native Gemini backend talks directly to Google.
+
+### Adding a second provider
+
+```dotenv
+GEMINI_API_KEY=...          # primary
+OPENAI_API_KEY=...          # second provider, independent credential
+RLA_FALLBACK_MODELS=openai/gpt-4o-mini
+```
+
+The key is named for the **provider**, not the routing role. A `FALLBACK_API_KEY` would
+become wrong the moment that provider is promoted to primary. Provider selection stays in
+configuration; no pipeline stage knows which provider is serving it.
+
+The router will only use the second provider for a stage if it reports support for that
+stage's capabilities — see the matrix below.
+
+### Provider capability differences are real
+
+LiteLLM is not a universal equaliser. Structured-output support is genuinely
+provider-dependent, which is why the capability gate exists. Current status:
+
+| Provider | Structured output | Status |
+|---|---|---|
+| Gemini (native or via LiteLLM) | server-side constrained decoding | **verified live** |
+| OpenAI (via LiteLLM) | `json_schema` strict mode | not yet exercised |
+| Anthropic (via LiteLLM) | no native constraint; weaker | not yet exercised |
+
+Only Gemini has been validated. See
+[`docs/llm_provider_validation.md`](docs/llm_provider_validation.md).
+
+---
+
+## Commands
+
+| Command | What it does | Needs a key? |
+|---|---|---|
+| `rla doctor [--llm]` | config, sources, cache. `--llm` probes every model live | `--llm` only |
+| `rla sources` | probe each source API to see which actually respond | no |
+| `rla stats` | summarise the stored corpus and graph | no |
+| `rla events` | print the pipeline phase order | no |
+| `rla build -t "topic"` | fetch 40-100 papers from all sources | no |
+| `rla run -t "topic" -q "question"` | full pipeline, streaming events as they happen | optional |
+| `rla ask "question"` | answer from the built graph (no re-acquisition) | for the answer |
+| `rla report` | per-paper limitations + synthesized cross-paper gaps | no |
+| `rla eval` | evaluation report → `data/eval/report.md` | no |
+| `rla tui -t "topic"` | live terminal UI (needs `textual`; use Windows Terminal) | optional |
+
+Add `--jsonl` to `run`, `ask`, or `report` for machine-readable output.
+
+### Typical first run
+
 ```powershell
-python -m src.rla.cli tui
+rla sources                 # confirm the source APIs work
+rla build -t "Graph-based agent architectures"
+rla run -t "Graph-based agent architectures" -q "How did GAT evolve?"
 ```
 
-**What you get:**
-- Live terminal UI with status strip, event log, traversal tree, and answer panel
-- Keyboard bindings: `q` = Quit, `c` = Clear log
-- KIRO-inspired dark theme (CSS restyling)
-- Real-time pipeline phase counters and graph metrics
+`rla ask` and `rla eval` need `data/graph/graph.json`, which only exists after a run that
+built a graph. That path is gitignored, so a fresh clone has no graph.
 
-### 3. Run the Test Suite
+---
+
+## Development
+
 ```powershell
-python -m pytest tests/ -q
+.\.venv\Scripts\python.exe -m pytest tests/ -q      # 507 tests, ~70s
+.\.venv\Scripts\python.exe -m ruff check src/ tests/  # lint
 ```
 
-**Result:** 425 passed in ~3 minutes
+Run a single module or test:
 
-### 7. Run Lint Check
 ```powershell
-python -m ruff check src/
+.\.venv\Scripts\python.exe -m pytest tests/test_p9_provider_routing.py -v
+.\.venv\Scripts\python.exe -m pytest tests/ -k fallback
 ```
 
-**Result:** All checks passed
+**Use the venv's tools, not the ones on `PATH`.** The system Python may lack `respx`
+(breaking test collection) and ships an older `ruff` that reports failures the pinned
+version does not.
+
+Test files are named `test_p<N>_*.py` after the `PLAN.md` milestone they gate, not after
+the module under test.
 
 ---
 
-## Expected Output Types
+## Architecture
 
-### From `rla eval`
-- **Markdown report** (`data/eval/report.md`): Human-readable comparison and gap analysis
-- **JSON output** (`data/eval/results.json`): Machine-readable structured data
-- **Console output**: Summary statistics shown during execution
-
-### From `rla tui`
-- **Status bar**: Phase strip + elapsed clock + counters (papers, concepts, nodes, edges)
-- **Tree view**: Traversal subgraph as tree (concept -> paper attachments)
-- **Log panel**: Colored event stream (ok=green, warn=yellow, error=bold red)
-- **Answer panel**: Streamed answer text with citation highlights
-
-### From Test Suite
-- **425 passing tests** across P0–P8 phases
-- Specific test modules test individual pipeline stages (state, app, cli, gaps, report)
-
----
-
-## Project Structure (Key Directories)
-
-```
-FODS_CP/
-src/rla/           - Main package
-eval/             - Evaluation harness (ground_truth, metrics, etc.)
-cli.py            - CLI entry point
-tui/              - Textual TUI (app.py, state.py)
-pipeline/         - Gap analysis, traversal, orchestrator
-store/            - Extraction & graph stores
-tests/            - 425 unit tests
-data/             - Corpus (63 papers), extractions (26), graph (90 nodes/35 edges)
-eval/             - Generated output (report.md, results.json)
-README.md         - This file
+```text
+Pipeline stages  →  LLMClient Protocol  →  ProviderRouter  →  ┬→ GeminiClient (native SDK)
+                                                          └→ LiteLLMBackend (optional)
 ```
 
----
+Pipeline stages never import a provider SDK. `ProviderRouter` owns model selection,
+capability gating, and fallback; retry, rate limiting, budget, and SQLite caching stay in
+`rla.llm.retry` / `rla.store.cache` so there is exactly one retry layer.
 
-## Known Constraints
+Sources, stores, and the evaluation harness are unchanged by the routing work.
 
-| Constraint | Status |
-|------------|--------|
-| Gemini quota exhausted | Heuristic judge only (citation validity/support) |
-| No hand-labelled reference set | Extraction accuracy = `NOT MEASURED` |
-| 37 held-out papers for gap validation | Structural gaps only (no concept-level precision/recall) |
-| Textual TUI (no KIRO migration) | KIRO-style CSS restyling applied |
+## Documentation
 
----
+| Document | What it covers |
+|---|---|
+| [`AGENTS.md`](AGENTS.md) | Conventions and gotchas for coding agents |
+| [`docs/llm_architecture_audit.md`](docs/llm_architecture_audit.md) | Audit of the LLM layer before the migration |
+| [`docs/llm_provider_migration_plan.md`](docs/llm_provider_migration_plan.md) | Migration design, ADRs, rollback |
+| [`docs/llm_provider_validation.md`](docs/llm_provider_validation.md) | Real-provider validation results |
+| [`PLAN.md`](PLAN.md) | Milestones P0-P9 and their acceptance gates |
 
-## Development Notes
+## Known limitations
 
-### Adding New Tests
-```bash
-# New P8 test example
-python -m pytest tests/test_p8_*.py -v
-```
+- **The Gemini free tier cannot complete a full run.** ~20 requests/model/day against
+  ~100 extraction calls for a 100-paper corpus. A paid key is needed for the full
+  pipeline; the free tier works for single commands and development.
+- **`rla eval` reports `NOT MEASURED` for extraction accuracy** because the shipped
+  reference set is not hand-labelled. The harness refuses to invent the number.
+- **Only Gemini has been validated through the routing layer.** No second provider is
+  configured.
+- **Textual needs Windows Terminal**, not legacy conhost.
 
-### Modifying Evaluation Logic
-```bash
-# Edit src/rla/eval/run_eval.py for core logic
-# Edit src/rla/eval/ground_truth.py for provenance schema
-```
+## License
 
-### Restyling the TUI
-```bash
-# Edit src/rla/tui/app.py CSS block for theme changes
-```
-
----
-
-Project complete: P0–P8 verified; P9 documented with KIRO-style CSS restyling.
+See repository history. `research-literature-agent-project-final.md` is the read-only
+original specification.

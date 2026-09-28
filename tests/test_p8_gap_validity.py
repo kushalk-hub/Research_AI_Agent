@@ -6,11 +6,8 @@ Tests for `check_gap` and the gap-verdict semantics after the
 
 from __future__ import annotations
 
-import pytest
-
+from rla.eval.gap_validity import GapVerdict, Verdict, check_gap, summarise
 from rla.models import Paper
-from rla.eval.gap_validity import check_gap, Verdict, GapVerdict, summarise
-
 
 # ---------------------------------------------------------------------------
 # Minimal paper fixtures

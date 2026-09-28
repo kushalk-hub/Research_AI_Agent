@@ -190,12 +190,19 @@ def build_prompt(paper: Paper, source_kind: str = "ABSTRACT") -> str:
 
 
 async def _extract_one(
-    paper: Paper, llm: LLMClient, semaphore: asyncio.Semaphore, source_kind: str
+    paper: Paper,
+    llm: LLMClient,
+    semaphore: asyncio.Semaphore,
+    source_kind: str,
+    model: str = "",
 ) -> tuple[Paper, Extraction | None, Exception | None]:
     async with semaphore:
         try:
+            # `model` must reach the call. The audit found this parameter was
+            # accepted and then used only to label the cost report, so the
+            # configured model never reached the provider.
             facts = await llm.generate_structured(
-                build_prompt(paper, source_kind), PaperFacts, stage=STAGE
+                build_prompt(paper, source_kind), PaperFacts, stage=STAGE, model=model or None
             )
         except (LLMError, ValueError) as exc:
             return paper, None, exc
@@ -233,7 +240,8 @@ async def extract_papers(
     # as_completed, not gather: a 100-paper run should report progress as it
     # happens rather than going quiet for two minutes and then dumping a total.
     futures = [
-        asyncio.ensure_future(_extract_one(paper, llm, semaphore, source_kind)) for paper in todo
+        asyncio.ensure_future(_extract_one(paper, llm, semaphore, source_kind, model))
+        for paper in todo
     ]
     done = 0
     reason_counts: dict[str, int] = {}

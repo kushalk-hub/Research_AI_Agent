@@ -11,6 +11,8 @@ from pydantic import BaseModel, ValidationError
 
 from rla.config import Settings, get_settings
 from rla.llm.base import LLMError, record_usage
+from rla.llm.error_map import normalize
+from rla.llm.errors import StructuredOutputError
 from rla.llm.prompts.templates import prompt_hash
 from rla.llm.retry import call_with_retry
 from rla.models import content_hash
@@ -42,7 +44,15 @@ class GeminiClient:
 
     Every call is keyed on (model, prompt, schema, temperature, prompt-hash) so
     re-running a stage costs nothing and prompt edits invalidate cleanly.
+
+    Implements the router's `RoutingBackend` contract. Every method returns
+    `(value, response)` so usage can be metered from whichever object carries it --
+    including the final streamed chunk, which is why answer generation previously
+    contributed zero tokens to the cost report.
     """
+
+    #: Routing backend identifier, also used in cache tags and doctor output.
+    name = "gemini"
 
     def __init__(
         self,
@@ -54,6 +64,19 @@ class GeminiClient:
         self.cache = cache
         self.tracker = tracker or CostTracker()
         self._client: Any | None = None
+
+    # -- capabilities -------------------------------------------------------
+    def supports(self, model: str, capability: str) -> bool:
+        """What this backend can do for a given model.
+
+        The direct Gemini backend is only ever asked about Gemini models, and every
+        current Gemini model in the configured set supports server-side
+        `response_schema`. The embedding model is explicitly *not* treated as
+        structured-output capable, because it is not a text model at all.
+        """
+        if capability == "supports_structured_output":
+            return "embedding" not in model
+        return False
 
     # -- properties --------------------------------------------------------
     @property
@@ -93,27 +116,33 @@ class GeminiClient:
         temperature: float,
         stage: str,
         tag: str,
-    ) -> str:
+    ) -> tuple[str, Any]:
         cache_key = self._key(
             prompt, model, json.dumps(schema, sort_keys=True) if schema else "", temperature, tag
         )
         if self.cache is not None:
             hit = self.cache.get(cache_key, kind="llm")
             if hit is not None:
-                return hit
+                # A cache hit has no provider response, so usage is genuinely
+                # unknown rather than zero -- which the tracker now distinguishes.
+                return hit, None
 
         config = self._config(schema, temperature)
 
         def _invoke() -> Any:
             return self.client.models.generate_content(model=model, contents=prompt, config=config)
 
-        response = await call_with_retry(
-            _invoke,
-            stage=f"gemini call failed for stage {stage}",
-            limiter=self.settings.llm_limiter,
-            max_retries=self.settings.llm_max_retries,
-            spender=self.settings.llm_spender,
-        )
+        try:
+            response = await call_with_retry(
+                _invoke,
+                stage=f"gemini call failed for stage {stage}",
+                limiter=self.settings.llm_limiter,
+                max_retries=self.settings.llm_max_retries,
+                spender=self.settings.llm_spender,
+                timeout=self.settings.llm_timeout_seconds,
+            )
+        except Exception as exc:
+            raise normalize(exc, provider="gemini", model=model, stage=stage) from exc
 
         record_usage(self.tracker, stage, response)
         text = response.text or ""
@@ -121,7 +150,7 @@ class GeminiClient:
             text = extract_json(text)
         if self.cache is not None:
             self.cache.set(cache_key, text, kind="llm")
-        return text
+        return text, response
 
     # -- public API --------------------------------------------------------
     async def generate_text(
@@ -131,8 +160,10 @@ class GeminiClient:
         model: str | None = None,
         temperature: float = 0.0,
         stage: str = "llm",
-    ) -> str:
-        return await self._call(prompt, model or self.fast_model, None, temperature, stage, "text")
+    ) -> tuple[str, Any]:
+        return await self._call(
+            prompt, model or self.fast_model, None, temperature, stage, "text"
+        )
 
     async def generate_structured(
         self,
@@ -143,22 +174,26 @@ class GeminiClient:
         temperature: float = 0.0,
         stage: str = "llm",
         retries: int = 2,
-    ) -> BaseModel:
+    ) -> tuple[BaseModel, Any]:
         json_schema = _schema_for(schema)
         last_error: Exception | None = None
         for _ in range(retries + 1):
-            text = await self._call(
+            text, response = await self._call(
                 prompt, model or self.fast_model, json_schema, temperature, stage, schema.__name__
             )
             try:
-                return schema.model_validate_json(text)
+                return schema.model_validate_json(text), response
             except (ValidationError, json.JSONDecodeError) as exc:
                 last_error = exc
                 prompt = (
                     f"{prompt}\n\nYour previous output failed schema validation: {exc}."
                     " Return valid JSON only."
                 )
-        raise LLMError(f"could not coerce response into {schema.__name__}") from last_error
+        # Reached only after the self-correction loop is exhausted, so this is a
+        # genuine contract failure rather than one bad response.
+        raise StructuredOutputError(
+            f"could not coerce response into {schema.__name__} after {retries + 1} attempts"
+        ) from last_error
 
     async def stream_text(
         self,
@@ -182,23 +217,40 @@ class GeminiClient:
                 config=self._config(None, temperature),
             )
 
-        stream = await call_with_retry(
-            _iter,
-            stage=f"gemini stream failed for stage {stage}",
-            limiter=self.settings.llm_limiter,
-            max_retries=self.settings.llm_max_retries,
-            spender=self.settings.llm_spender,
-        )
+        try:
+            stream = await call_with_retry(
+                _iter,
+                stage=f"gemini stream failed for stage {stage}",
+                limiter=self.settings.llm_limiter,
+                max_retries=self.settings.llm_max_retries,
+                spender=self.settings.llm_spender,
+            )
+        except Exception as exc:
+            raise normalize(
+                exc, provider="gemini", model=model or self.strong_model, stage=stage
+            ) from exc
 
         collected: list[str] = []
+        last_chunk: Any = None
         try:
             for chunk in await asyncio.to_thread(lambda: list(stream)):
+                last_chunk = chunk
                 piece = getattr(chunk, "text", "") or ""
                 if piece:
                     collected.append(piece)
                     yield piece
         except Exception as exc:
-            raise LLMError(f"gemini stream failed for stage {stage}: {exc}") from exc
+            raise normalize(
+                exc, provider="gemini", model=model or self.strong_model, stage=stage
+            ) from exc
+
+        # The audit found streaming was never metered at all, so the answer stage --
+        # the only consumer of the strong model and the only long-form generation --
+        # contributed zero tokens and reported cost was a lower bound. The final
+        # chunk carries usage_metadata; if the provider omits it, the tracker
+        # records "unknown" rather than zero.
+        if last_chunk is not None:
+            record_usage(self.tracker, stage, last_chunk)
 
         if self.cache is not None:
             self.cache.set(cache_key, "".join(collected), kind="llm")

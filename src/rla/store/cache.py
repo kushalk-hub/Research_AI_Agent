@@ -19,13 +19,52 @@ import httpx
 
 from rla.errors import SourceFormatError
 
-#: USD per 1M tokens, used only for the rough cost report printed at run end.
+#: USD per 1M tokens for the rough cost report printed at run end.
+#:
+#: Keys are matched EXACTLY (after stripping a `provider/` routing prefix), never by
+#: substring. The previous substring scan iterated this dict in insertion order, so
+#: `'gemini-2.5-flash'` matched inside `'gemini-2.5-flash-lite'` first and the lite
+#: model was priced at the full-flash rate -- a 3x overcharge on input and 6.25x on
+#: output, on the model that actually does most of the work. Substring matching is
+#: the wrong tool for model ids: `flash` is a prefix of `flash-lite`, and any
+#: vendor family name is a substring of its own variants.
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
     # Free on AI Studio today, so a zero estimate understates nothing yet.
     "gemini-embedding-001": (0.0, 0.0),
 }
+
+#: Explicit aliases for ids that should price as another entry. Exact-match only,
+#: so an alias is always a deliberate statement rather than an accident of naming.
+MODEL_PRICING_ALIASES: dict[str, str] = {}
+
+
+def bare_model_id(model: str) -> str:
+    """Strip a `provider/` routing prefix so both spellings price identically.
+
+    LiteLLM routes on strings like `gemini/gemini-2.5-flash`; the direct backends
+    use `gemini-2.5-flash`. Neither should be unpriced just because the operator
+    wrote a prefix.
+    """
+    return model.strip().split("/", 1)[1] if "/" in model else model.strip()
+
+
+def price_for(model: str) -> tuple[float, float] | None:
+    """Return (input, output) rates per 1M tokens, or None if the model is unlisted.
+
+    None is a real answer: it means "we do not know what this costs", which the
+    report must show rather than silently rounding to a confident $0.00.
+    """
+    if not model:
+        return None
+    bare = bare_model_id(model)
+    if bare in MODEL_PRICING:
+        return MODEL_PRICING[bare]
+    alias = MODEL_PRICING_ALIASES.get(bare)
+    if alias and alias in MODEL_PRICING:
+        return MODEL_PRICING[alias]
+    return None
 
 
 class RateLimiter:
@@ -48,28 +87,48 @@ class RateLimiter:
 
 @dataclass
 class CostTracker:
-    """Accumulates token usage so every stage can report what it cost."""
+    """Accumulates token usage so every stage can report what it cost.
 
-    input_tokens: int = 0
-    output_tokens: int = 0
+    Token counts are `int | None`, and `None` propagates: a call whose usage the
+    provider did not report leaves the running total unknown rather than
+    contributing a zero. The distinction is what stops a provider that silently
+    drops usage metadata from making the whole run look free.
+    """
+
+    input_tokens: int | None = 0
+    output_tokens: int | None = 0
     calls: int = 0
+    #: Calls for which the provider reported no usage at all.
+    unknown_calls: int = 0
     by_stage: dict[str, dict[str, int]] = field(default_factory=dict)
 
-    def record(self, stage: str, input_tokens: int, output_tokens: int) -> None:
-        self.input_tokens += input_tokens
-        self.output_tokens += output_tokens
+    def record(
+        self, stage: str, input_tokens: int | None, output_tokens: int | None
+    ) -> None:
+        """Add one call's usage. `None` on either side marks the total unknown."""
         self.calls += 1
+        if input_tokens is None or output_tokens is None:
+            self.unknown_calls += 1
+            # One unknown call poisons the aggregate: the sum is not knowable.
+            self.input_tokens = None
+            self.output_tokens = None
+        else:
+            if self.input_tokens is not None:
+                self.input_tokens += input_tokens
+                self.output_tokens = (self.output_tokens or 0) + output_tokens
+
         bucket = self.by_stage.setdefault(stage, {"calls": 0, "input": 0, "output": 0})
         bucket["calls"] += 1
-        bucket["input"] += input_tokens
-        bucket["output"] += output_tokens
+        if input_tokens is not None:
+            bucket["input"] += input_tokens
+            bucket["output"] += output_tokens
+        else:
+            bucket["input"] = -1  # sentinel: counted, but not summable
+            bucket["output"] = -1
 
     @staticmethod
-    def _price(model: str) -> tuple[float, float]:
-        for key, price in MODEL_PRICING.items():
-            if key in model:
-                return price
-        return (0.0, 0.0)
+    def _price(model: str) -> tuple[float, float] | None:
+        return price_for(model)
 
     @staticmethod
     def _is_priced(model: str) -> bool:
@@ -78,36 +137,71 @@ class CostTracker:
         Without this a misconfigured or newly released model reports a confident
         $0.00, which is indistinguishable from actually costing nothing.
         """
-        return any(key in model for key in MODEL_PRICING)
+        return price_for(model) is not None
 
-    def estimate_usd(self, model: str) -> float:
-        in_rate, out_rate = self._price(model)
+    @staticmethod
+    def _bucket_tokens(value: int) -> int | None:
+        """Per-stage token totals, where the -1 sentinel means 'not summable'."""
+        return None if value < 0 else value
+
+    def estimate_usd(self, model: str) -> float | None:
+        """Estimated spend, or None when it cannot be known.
+
+        None is returned for two distinct reasons that the report distinguishes
+        via `cost_status`: the tokens are unknown, or the model is unpriced. A
+        confident number in either case would be fabrication.
+        """
+        rates = price_for(model) if model else None
+        if rates is None or self.input_tokens is None or self.output_tokens is None:
+            return None
+        in_rate, out_rate = rates
         return (self.input_tokens * in_rate + self.output_tokens * out_rate) / 1_000_000
 
+    def _cost_status(self, model: str) -> str:
+        """Why `estimated_usd` is or is not available."""
+        if not model:
+            return "no_model"
+        if self.input_tokens is None or self.output_tokens is None:
+            return "unknown_usage"
+        if price_for(model) is None:
+            return "unpriced_model"
+        return "ok"
+
     def to_dict(self, model: str = "") -> dict[str, Any]:
+        estimate = self.estimate_usd(model) if model else None
         return {
             "calls": self.calls,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
-            "estimated_usd": round(self.estimate_usd(model), 4) if model else None,
+            "unknown_usage_calls": self.unknown_calls,
+            "estimated_usd": round(estimate, 4) if estimate is not None else None,
             "model_priced": self._is_priced(model) if model else None,
+            "cost_status": self._cost_status(model) if model else "no_model",
             "by_stage": self.by_stage,
         }
 
     def stage_report(self, stage: str, model: str = "") -> dict[str, Any]:
         """Cost of one stage alone, so a long pipeline can attribute spend."""
         bucket = self.by_stage.get(stage, {"calls": 0, "input": 0, "output": 0})
-        in_rate, out_rate = self._price(model)
+        rates = price_for(model) if model else None
+        known = rates is not None and bucket["input"] >= 0
+        estimate = (
+            (bucket["input"] * rates[0] + bucket["output"] * rates[1]) / 1e6
+            if known and rates is not None
+            else None
+        )
+        status = (
+            "ok"
+            if known and model
+            else ("no_model" if not model else ("unknown_usage" if rates else "unpriced_model"))
+        )
         return {
             "calls": bucket["calls"],
-            "input_tokens": bucket["input"],
-            "output_tokens": bucket["output"],
-            "estimated_usd": round(
-                (bucket["input"] * in_rate + bucket["output"] * out_rate) / 1e6, 4
-            )
-            if model
-            else None,
+            "input_tokens": self._bucket_tokens(bucket["input"]),
+            "output_tokens": self._bucket_tokens(bucket["output"]),
+            "estimated_usd": round(estimate, 4) if estimate is not None else None,
             "model_priced": self._is_priced(model) if model else None,
+            "cost_status": status,
         }
 
 

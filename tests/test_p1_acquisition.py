@@ -962,7 +962,6 @@ def test_the_doctor_llm_probe_never_reports_a_stale_cached_ok(settings, monkeypa
     """
     import asyncio
 
-    import rla.cli as cli
     from rla.cli import _probe_llm
 
     seen = {}
@@ -972,14 +971,32 @@ def test_the_doctor_llm_probe_never_reports_a_stale_cached_ok(settings, monkeypa
             seen["cache"] = cache
 
         @property
+        def backend(self):
+            return type("B", (), {"name": "test"})()
+
+        @property
         def fast_model(self):
             return "test-model"
 
         async def generate_text(self, prompt, **kwargs):
             raise LLMError("401 UNAUTHENTICATED: invalid credentials")
 
-    monkeypatch.setattr(cli, "GeminiClient", RecordingClient)
+    class RecordingEmbedder:
+        def __init__(self, s, cache, tracker):
+            seen["embed_cache"] = cache
+
+        async def embed_one(self, text):
+            raise LLMError("401 UNAUTHENTICATED: invalid credentials")
+
+    # The probe now builds through the factory, so that is the seam to patch.
+    # The invariant under test is unchanged: the probe must be constructed with a
+    # None cache, whatever backend is selected.
+    monkeypatch.setattr("rla.llm.factory.build_client", lambda *a, **k: RecordingClient(*a, **k))
+    monkeypatch.setattr("rla.cli.Embedder", RecordingEmbedder, raising=False)
+    monkeypatch.setattr("rla.llm.embeddings.Embedder", RecordingEmbedder)
     status, detail = asyncio.run(_probe_llm(settings))
+
+    assert seen["embed_cache"] is None
 
     assert seen["cache"] is None
     assert status == "unusable"

@@ -15,7 +15,7 @@ from rich.table import Table
 
 from rla.config import get_settings
 from rla.events import Event
-from rla.llm.gemini import GeminiClient
+from rla.llm.factory import build_client
 from rla.models import Corpus
 from rla.pipeline.gaps import GapReport
 from rla.pipeline.orchestrator import Pipeline, PipelineResult
@@ -69,13 +69,16 @@ def _print_event(evt: Event) -> None:
 def _build_pipeline() -> tuple[Pipeline, Cache, PipelineResult]:
     """Wire the pipeline once, so `run` and `tui` cannot drift apart.
 
+    The LLM client is built by the factory from configuration, so selecting a
+    provider is an env var rather than a code edit.
+
     Returns the cache too because the caller owns its lifetime: `run` closes it
     when the stream ends, the TUI closes it when the worker finishes.
     """
     settings = get_settings()
     cache = Cache(settings.cache_db)
     tracker = CostTracker()
-    llm = GeminiClient(settings, cache, tracker) if settings.gemini_api_key else None
+    llm = build_client(settings, cache, tracker)
     return Pipeline(settings, llm, cache, tracker), cache, PipelineResult()
 
 
@@ -167,15 +170,27 @@ async def _probe_llm(settings) -> tuple[str, str]:
     perfectly valid while a model on it is retired (404) or outside the tier
     (429 "limit: 0"), and those failures only surface much later as a dead
     extraction or resolution stage.
+
+    Probes the *configured* backend, so `RLA_LLM_PROVIDER=litellm rla doctor --llm`
+    verifies the routing layer rather than the Gemini SDK behind it.
     """
     from rla.llm.base import LLMError
+    from rla.llm.embeddings import Embedder
+    from rla.llm.errors import ProviderError
+    from rla.llm.factory import build_client
 
-    client = GeminiClient(settings, None, CostTracker())
+    try:
+        client = build_client(settings, None, CostTracker())
+    except Exception as exc:
+        return "unusable", f"cannot build the configured backend: {exc}"
+    if client is None:
+        return "unusable", "GEMINI_API_KEY is not set"
+
     problems: list[str] = []
 
     for label, model in (
-        ("fast", settings.fast_model),
-        ("strong", settings.strong_model),
+        ("structured", settings.model_for_structured),
+        ("answer", settings.model_for_answer),
     ):
         try:
             text = await client.generate_text(
@@ -189,18 +204,20 @@ async def _probe_llm(settings) -> tuple[str, str]:
         if not problems:
             console.print(f"[green]{detail}[/]")
 
-    from rla.llm.embeddings import Embedder
+    console.print(f"[dim]backend: {client.backend.name}[/]")
 
     try:
         vector = await Embedder(settings, None, CostTracker()).embed_one("doctor")
         if not problems:
-            console.print(f"[green]embedding {settings.embedding_model} ok ({len(vector)} dims)[/]")
-    except LLMError as exc:
+            console.print(
+                f"[green]embedding {settings.embedding_model} ok ({len(vector)} dims)[/]"
+            )
+    except (LLMError, ProviderError) as exc:
         reason = " ".join(str(exc).split())
         problems.append(f"embedding {settings.embedding_model}: {reason[:120]}{_hint(reason)}")
 
     if not problems:
-        return "ok", f"{settings.fast_model}, {settings.embedding_model} reachable"
+        return "ok", f"{settings.model_for_structured}, {settings.embedding_model} reachable"
     return "unusable", "; ".join(problems)
 
 
@@ -213,6 +230,8 @@ def _hint(reason: str) -> str:
         return " - model retired; pick a current one in .env"
     if "limit: 0" in low or "resource_exhausted" in low:
         return " - free tier has no quota for this model; use a flash-tier model"
+    if "quota" in low and "day" in low:
+        return " - the daily per-model allowance is spent; use a model with quota left"
     return ""
 
 
@@ -393,7 +412,7 @@ def ask(
 
     cache = Cache(settings.cache_db)
     tracker = CostTracker()
-    llm = GeminiClient(settings, cache, tracker) if settings.gemini_api_key else None
+    llm = build_client(settings, cache, tracker)
     if llm is None:
         console.print(
             "[yellow]no GEMINI_API_KEY set[/]; showing the traversed subgraph only."

@@ -31,6 +31,60 @@ from rla.pipeline.traverse import (
 #: only worth rendering if the model produces real prose, not JSON punctuation.
 _MIN_CHUNK = 2
 
+#: Provider errors are multi-kilobyte JSON blobs. `rla ask` is the one command a
+#: human reads at a terminal, so an untruncated blob here buries the sentence that
+#: actually says what went wrong. Query expansion and scoring already truncate via
+#: their own `_reason`; this keeps the answer stage from being the odd one out.
+_ERROR_LIMIT = 200
+
+
+def _reason(exc: Exception, limit: int = _ERROR_LIMIT) -> str:
+    """Collapse a provider error to a readable, actionable one-liner.
+
+    Truncation alone is not enough. A bare `429 RESOURCE_EXHAUSTED {...}` tells the
+    reader nothing about what to do next, and the interesting part -- "this is a
+    daily cap, not a burst" -- is buried in the JSON.
+
+    The provider's own text is kept *last* and truncated, because it is the least
+    actionable part: leading with it pushes the guidance off the end. An earlier
+    version of this function did exactly that and the useful sentence never
+    survived truncation.
+    """
+    raw = " ".join(str(exc).split())
+    category = getattr(exc, "category", None)
+    if category is None:
+        return raw if len(raw) <= limit else raw[: limit - 1] + "…"
+
+    parts = [f"{str(category).replace('_', ' ')}: "]
+    guidance = _CATEGORY_GUIDANCE.get(str(category))
+    if guidance:
+        parts.append(guidance + ". ")
+    # Reserve room for the headline and guidance so the provider blob is what
+    # gets cut, never the instruction.
+    budget = max(0, limit - sum(len(p) for p in parts))
+    detail = raw if len(raw) <= budget else raw[: max(0, budget - 1)].rstrip() + "…"
+    parts.append(detail if detail else "(no provider detail)")
+    return "".join(parts)
+
+
+#: What the reader can actually do about each failure. Only categories that a human
+#: can act on get a line; transient ones already retry themselves.
+#:
+#: Keys are `ErrorCategory` values verbatim (`str(ErrorCategory.QUOTA_EXHAUSTED)` is
+#: `"quota_exhausted"`, with the underscore). Written with a space here the lookup
+#: silently misses and the guidance never appears -- which is exactly what happened
+#: on the first attempt at this.
+_CATEGORY_GUIDANCE: dict[str, str] = {
+    "quota_exhausted": (
+        "the daily per-model allowance is spent, so retrying will not help; "
+        "it resets at the daily boundary, or set RLA_FALLBACK_ON_QUOTA=1 to fail "
+        "over to a model with budget remaining"
+    ),
+    "auth_failed": "check GEMINI_API_KEY (an OAuth token returns 401, not an API key)",
+    "unsupported": "the configured model cannot serve this stage; see RLA_ANSWER_MODEL",
+    "budget_exhausted": "raise RLA_LLM_DAILY_BUDGET, or lower the per-stage workload",
+}
+
 
 @dataclass
 class AnswerResult:
@@ -127,7 +181,7 @@ async def answer_question(
     except Exception as exc:  # LLMError and transport failures alike
         yield event(
             Phase.ANSWER,
-            f"answer generation failed: {exc}",
+            f"answer generation failed — {_reason(exc)}",
             kind="error",
             question_type=str(qtype),
         )

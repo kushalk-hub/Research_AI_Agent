@@ -324,23 +324,12 @@
       ]
     },
     {
-      "id": "concept:digital-twin",
-      "name": "Digital Twin",
+      "id": "concept:digital-twin-edge-network",
+      "name": "Digital Twin Edge Network",
       "description": "technology used to construct a digital twin edge network (DITEN) to reflect the physical MEC system in real-time and provide data for training",
       "first_seen_year": null,
       "aliases": [
-        "Digital Twin"
-      ],
-      "paper_ids": [
-        "55d4c121a8cf4e9f866e84c3d5a730e3baa7e1d0"
-      ]
-    },
-    {
-      "id": "concept:digital-twin-edge-network",
-      "name": "Digital Twin Edge Network",
-      "description": "a network constructed to reflect the physical MEC system in real-time and provide data for training",
-      "first_seen_year": null,
-      "aliases": [
+        "Digital Twin",
         "Digital Twin Edge Network"
       ],
       "paper_ids": [
@@ -1308,5 +1297,375 @@
       ]
     }
   ],
-  "decisions": []
+  "decisions": [
+    {
+      "kept": "Digital Twin",
+      "merged": "Digital Twin Edge Network",
+      "canonical": "Digital Twin",
+      "verdict": "same",
+      "reason": "auto-similarity",
+      "evidence": "cosine=0.936 >= 0.92",
+      "confidence": 0.9355840059628642
+    },
+    {
+      "kept": "Graph Convolutional Network",
+      "merged": "Graph Neural Networks",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "llm-judge",
+      "evidence": "cosine=0.893",
+      "confidence": 0.95
+    },
+    {
+      "kept": "partially observable 3D environments",
+      "merged": "Partially Observable Environment",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "llm-judge",
+      "evidence": "cosine=0.886",
+      "confidence": 0.9
+    },
+    {
+      "kept": "Adaptive Traffic Signal Optimisation",
+      "merged": "Adaptive Traffic Signal Control",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-Agent Transformer (MAT)",
+      "merged": "MAT-GAT",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Neural Networks",
+      "merged": "Dynamic Graph Neural Networks",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention-based Multi-Agent Reinforcement Learning",
+      "merged": "MAT-GAT",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-agent deep reinforcement learning",
+      "merged": "Multi-Agent Reinforcement Learning (MARL)",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-agent deep reinforcement learning",
+      "merged": "Decentralized Multi-Agent Reinforcement Learning",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "MAT-GAT",
+      "merged": "Multi-Agent Soft Actor-Critic with Graph Attention Networks",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "llm-judge",
+      "evidence": "cosine=0.825",
+      "confidence": 0.95
+    },
+    {
+      "kept": "Graph Attention-based Multi-Agent Reinforcement Learning",
+      "merged": "Multi-Agent Soft Actor-Critic with Graph Attention Networks",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Gated Recurrent Unit",
+      "merged": "Convolutional Neural Network",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "generalized advantage estimation",
+      "merged": "Advantage Actor-Critic",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-Agent Soft Actor-Critic with Graph Attention Networks",
+      "merged": "Graph Attention Multi-Agent Proximal Policy Optimization",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention-based Multi-Agent Reinforcement Learning",
+      "merged": "Graph Attention Multi-Agent Proximal Policy Optimization",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "MAT-GAT",
+      "merged": "RVO-GAT-MARl",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Spatiotemporal Graph Attention Network",
+      "merged": "Spatial-Temporal Graph Attention Network",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "MAT-GAT",
+      "merged": "Graph Attention Multi-Agent Proximal Policy Optimization",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention Networks (GAT)",
+      "merged": "Heterogeneous graph attention networks",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention Networks (GAT)",
+      "merged": "graph attention",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention Networks (GAT)",
+      "merged": "MAT-GAT",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-Agent Transformer (MAT)",
+      "merged": "Multi-Agent Soft Actor-Critic with Graph Attention Networks",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-Agent Soft Actor-Critic with Graph Attention Networks",
+      "merged": "RVO-GAT-MARl",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention Networks",
+      "merged": "Graph Attention-based Multi-Agent Reinforcement Learning",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention-based Multi-Agent Reinforcement Learning",
+      "merged": "Multi-Agent Transformer (MAT)",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-Agent Proximal Policy Optimization",
+      "merged": "MAPPO",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Hierarchical Graph Attention Network (HGAT)",
+      "merged": "Heterogeneous graph attention networks",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Self-attention mechanisms",
+      "merged": "attention mechanisms",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention-based Multi-Agent Reinforcement Learning",
+      "merged": "L2AF",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention Networks (GAT)",
+      "merged": "ego-centric graph attention",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention-based Multi-Agent Reinforcement Learning",
+      "merged": "graph attention",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention Networks",
+      "merged": "MAT-GAT",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Soft Actor-Critic",
+      "merged": "Multi-Agent Soft Actor-Critic with Graph Attention Networks",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-Agent Reinforcement Learning (MARL)",
+      "merged": "Decentralized Multi-Agent Reinforcement Learning",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention Networks",
+      "merged": "Graph Attention Multi-Agent Proximal Policy Optimization",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Transformer encoder",
+      "merged": "Gated Recurrent Unit (GRU)",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-Agent Transformer (MAT)",
+      "merged": "Agent-Temporal Attention for Reward Redistribution (AREL)",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Attention Networks (GAT)",
+      "merged": "Hierarchical Graph Attention Network (HGAT)",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Graph Convolutional Network",
+      "merged": "Dynamic Graph Neural Networks",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-Agent Soft Actor-Critic with Graph Attention Networks",
+      "merged": "graph attention",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "judge-failed",
+      "evidence": "gemini call failed for stage resolution: daily free-tier quota exhausted (generativelanguage.googleapis.com/generate_content_free_tier_requ...",
+      "confidence": null
+    },
+    {
+      "kept": "Multi-Agent Soft Actor-Critic with Graph Attention Networks",
+      "merged": "L2AF",
+      "canonical": "",
+      "verdict": "different",
+      "reason": "llm-judge",
+      "evidence": "cosine=0.774",
+      "confidence": 0.9
+    }
+  ]
 }

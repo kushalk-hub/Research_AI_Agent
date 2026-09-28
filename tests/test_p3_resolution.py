@@ -410,14 +410,44 @@ async def test_the_cost_of_the_judge_calls_is_reported():
         llm=judge,
         embedder=embedder,
         tracker=tracker,
-        model="test-model",
+        model="gemini-2.5-flash",
     )
 
     cost = events[-1].payload["cost"]
     assert cost["input_tokens"] == 200
     assert cost["output_tokens"] == 20
     assert cost["calls"] >= 1
+    # A priced model yields a real figure...
     assert cost["estimated_usd"] is not None
+    assert cost["cost_status"] == "ok"
+
+
+async def test_an_unpriced_judge_model_reports_unknown_rather_than_free():
+    """The judge stage must not invent a cost for a model it cannot price.
+
+    The audit found the reported cost was a lower bound in two ways at once: the
+    configured model never reached the provider, and unknown usage rendered as
+    zero. Here the model is deliberately unpriced, so the honest report is
+    `None` plus a reason, not a confident $0.00.
+    """
+    tracker = CostTracker()
+    judge = FakeJudge({("GAT", "graph attention networks"): "same"})
+    embedder = FakeEmbedder({"GAT": vec(0), "graph attention networks": vec(30)})
+    tracker.record(STAGE, input_tokens=200, output_tokens=20)
+
+    events, _, _ = await drain(
+        [extraction("p1", "GAT"), extraction("p2", "graph attention networks")],
+        llm=judge,
+        embedder=embedder,
+        tracker=tracker,
+        model="a-model-this-build-cannot-price",
+    )
+
+    cost = events[-1].payload["cost"]
+    assert cost["calls"] >= 1
+    assert cost["input_tokens"] == 200  # tokens are still attributed
+    assert cost["estimated_usd"] is None
+    assert cost["cost_status"] == "unpriced_model"
 
 
 async def test_a_failing_embedder_degrades_to_name_only_rather_than_crashing():
