@@ -1,0 +1,16 @@
+    .env
+data/cache.db
+data/cache.db-journal
+data/raw/
+data/graph/
+eval/report.md
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.env

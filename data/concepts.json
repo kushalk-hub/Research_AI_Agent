@@ -1,0 +1,1312 @@
+{
+  "concepts": [
+    {
+      "id": "concept:graph-attention-networks",
+      "name": "Graph Attention Networks",
+      "description": "a type of neural network that operates on graph-structured data, incorporating attention mechanisms to weigh the importance of neighboring nodes",
+      "first_seen_year": null,
+      "aliases": [
+        "Graph Attention Networks",
+        "Graph attention networks"
+      ],
+      "paper_ids": [
+        "f93cc5ab9c28218686155e5e1a9fbf0d0e1a0609",
+        "55d4c121a8cf4e9f866e84c3d5a730e3baa7e1d0",
+        "doi:10.3390/systems14010047",
+        "c56e2f255e56ebd4530f4a164a98fc015b31902e",
+        "doi:10.1371/journal.pone.0318981",
+        "5c987a5aa34a39dc0f1d30bde51bb5393a7b4640",
+        "d63daa8c1e2c3f7d0e6e2cce7f770eedcd4907bb",
+        "doi:10.2139/ssrn.5960262",
+        "doi:10.21203/rs.3.rs-10945491/v1",
+        "doi:10.15607/rss.2023.xix.105",
+        "doi:10.1109/icrae67496.2025.00033",
+        "doi:10.1109/cvci66304.2025.11348190",
+        "doi:10.1016/j.neunet.2026.109676",
+        "f9d2325ee2788b7ea8fac2edc17ecfde49cd03aa",
+        "1e48868bab068a3778f1a10f94bb240881ec3670"
+      ]
+    },
+    {
+      "id": "concept:multi-agent-reinforcement-learning",
+      "name": "Multi-Agent Reinforcement Learning",
+      "description": "a type of reinforcement learning involving multiple agents that learn to interact with each other and their environment",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-Agent Reinforcement Learning",
+        "Multi-agent reinforcement learning",
+        "multi-agent reinforcement learning"
+      ],
+      "paper_ids": [
+        "55d4c121a8cf4e9f866e84c3d5a730e3baa7e1d0",
+        "ff97777c25699d27d9de36a0e7e8abcc4aeb9594",
+        "doi:10.21203/rs.3.rs-8814483/v1",
+        "doi:10.15607/rss.2023.xix.105",
+        "doi:10.1109/cvci66304.2025.11348190",
+        "doi:10.1109/ecie69549.2026.11565623"
+      ]
+    },
+    {
+      "id": "concept:multi-agent-proximal-policy-optimization",
+      "name": "Multi-Agent Proximal Policy Optimization",
+      "description": "a reinforcement learning algorithm designed for multi-agent systems, focusing on stable policy updates",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-Agent Proximal Policy Optimization"
+      ],
+      "paper_ids": [
+        "5c987a5aa34a39dc0f1d30bde51bb5393a7b4640",
+        "doi:10.2139/ssrn.5960262",
+        "doi:10.21203/rs.3.rs-10945491/v1"
+      ]
+    },
+    {
+      "id": "concept:multi-agent-reinforcement-learning-marl",
+      "name": "Multi-Agent Reinforcement Learning (MARL)",
+      "description": "a subfield of reinforcement learning that deals with multiple agents interacting in an environment",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-Agent Reinforcement Learning (MARL)"
+      ],
+      "paper_ids": [
+        "8ed12766d939390b9d93084d5fd16ead8b94a9ed",
+        "arxiv:2201.04612v1",
+        "b14689d0c5729e8496f1deec09ef99262a211ea0"
+      ]
+    },
+    {
+      "id": "concept:gated-recurrent-unit",
+      "name": "Gated Recurrent Unit",
+      "description": "a component incorporated with a Convolutional Neural Network to fuse historical observations",
+      "first_seen_year": null,
+      "aliases": [
+        "Gated Recurrent Unit"
+      ],
+      "paper_ids": [
+        "doi:10.1371/journal.pone.0318981",
+        "ff97777c25699d27d9de36a0e7e8abcc4aeb9594"
+      ]
+    },
+    {
+      "id": "concept:graph-attention-network",
+      "name": "Graph Attention Network",
+      "description": "enables selective and adaptive information sharing with neighboring intersections",
+      "first_seen_year": null,
+      "aliases": [
+        "Graph Attention Network"
+      ],
+      "paper_ids": [
+        "ff97777c25699d27d9de36a0e7e8abcc4aeb9594",
+        "f865c4676281f578de1dae7a9982d448614dd8f9"
+      ]
+    },
+    {
+      "id": "concept:mobile-edge-computing",
+      "name": "Mobile Edge Computing",
+      "description": "enables various services to be cached in close proximity to the user equipments (UEs), thereby reducing the service delay of many emerging applications",
+      "first_seen_year": null,
+      "aliases": [
+        "Mobile Edge Computing"
+      ],
+      "paper_ids": [
+        "55d4c121a8cf4e9f866e84c3d5a730e3baa7e1d0",
+        "doi:10.2139/ssrn.5960262"
+      ]
+    },
+    {
+      "id": "concept:multi-agent-systems",
+      "name": "Multi-Agent Systems",
+      "description": "real-world agents for GEVC are expected to cooperate in a dynamically shifting grid",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-Agent Systems"
+      ],
+      "paper_ids": [
+        "f93cc5ab9c28218686155e5e1a9fbf0d0e1a0609",
+        "doi:10.1109/icrae67496.2025.00033"
+      ]
+    },
+    {
+      "id": "concept:reinforcement-learning",
+      "name": "Reinforcement Learning",
+      "description": "a class of machine learning algorithms that learn to make a sequence of decisions by trying to maximize a reward signal",
+      "first_seen_year": null,
+      "aliases": [
+        "Reinforcement Learning"
+      ],
+      "paper_ids": [
+        "doi:10.1109/icrae67496.2025.00033",
+        "1e48868bab068a3778f1a10f94bb240881ec3670"
+      ]
+    },
+    {
+      "id": "concept:attention-mechanism",
+      "name": "attention mechanism",
+      "description": "concentrates on effective information sharing among multiple agents, synergizing different-sized subnetworks in the grid for cooperative learning",
+      "first_seen_year": null,
+      "aliases": [
+        "Attention Mechanism",
+        "attention mechanism"
+      ],
+      "paper_ids": [
+        "f93cc5ab9c28218686155e5e1a9fbf0d0e1a0609",
+        "arxiv:2408.15449v2"
+      ]
+    },
+    {
+      "id": "concept:attention-mechanisms",
+      "name": "attention mechanisms",
+      "description": "mechanisms used to characterize the influence of actions on state transitions and agent interactions",
+      "first_seen_year": null,
+      "aliases": [
+        "attention mechanisms",
+        "Attention Mechanisms"
+      ],
+      "paper_ids": [
+        "c56e2f255e56ebd4530f4a164a98fc015b31902e",
+        "arxiv:2201.04612v1"
+      ]
+    },
+    {
+      "id": "concept:adaptive-traffic-signal-control",
+      "name": "Adaptive Traffic Signal Control",
+      "description": "the problem of dynamically adjusting traffic signal timings to optimize traffic flow",
+      "first_seen_year": null,
+      "aliases": [
+        "Adaptive Traffic Signal Control"
+      ],
+      "paper_ids": [
+        "1e48868bab068a3778f1a10f94bb240881ec3670"
+      ]
+    },
+    {
+      "id": "concept:adaptive-traffic-signal-optimisation",
+      "name": "Adaptive Traffic Signal Optimisation",
+      "description": "a challenging problem for urban traffic networks, having important implications for congestion reduction, traffic efficiency, and environmental conservation",
+      "first_seen_year": null,
+      "aliases": [
+        "Adaptive Traffic Signal Optimisation"
+      ],
+      "paper_ids": [
+        "d63daa8c1e2c3f7d0e6e2cce7f770eedcd4907bb"
+      ]
+    },
+    {
+      "id": "concept:advanced-air-mobility",
+      "name": "Advanced Air Mobility",
+      "description": "a new mode of air transport for passengers and cargo within urban and regional areas",
+      "first_seen_year": null,
+      "aliases": [
+        "Advanced Air Mobility"
+      ],
+      "paper_ids": [
+        "doi:10.15607/rss.2023.xix.105"
+      ]
+    },
+    {
+      "id": "concept:advantage-actor-critic",
+      "name": "Advantage Actor-Critic",
+      "description": "a reinforcement learning algorithm that uses a value function to guide the learning of a policy",
+      "first_seen_year": null,
+      "aliases": [
+        "Advantage Actor-Critic"
+      ],
+      "paper_ids": [
+        "1e48868bab068a3778f1a10f94bb240881ec3670"
+      ]
+    },
+    {
+      "id": "concept:agent-temporal-attention-for-reward-redistribution-arel",
+      "name": "Agent-Temporal Attention for Reward Redistribution (AREL)",
+      "description": "a method that uses attention mechanisms to characterize the influence of actions on state transitions along trajectories and how each agent is affected by other agents at each time-step",
+      "first_seen_year": null,
+      "aliases": [
+        "Agent-Temporal Attention for Reward Redistribution (AREL)"
+      ],
+      "paper_ids": [
+        "arxiv:2201.04612v1"
+      ]
+    },
+    {
+      "id": "concept:attention-based-temporal-fusion",
+      "name": "Attention-based Temporal Fusion",
+      "description": "a mechanism that combines temporal information with attention to focus on relevant time steps",
+      "first_seen_year": null,
+      "aliases": [
+        "Attention-based Temporal Fusion"
+      ],
+      "paper_ids": [
+        "2a8bca42351ade41f8ce5ff51387736a02540e32"
+      ]
+    },
+    {
+      "id": "concept:ccpa",
+      "name": "CCPA",
+      "description": "a state statute intended to promote consumer privacy and data protection in the US state of California",
+      "first_seen_year": null,
+      "aliases": [
+        "CCPA"
+      ],
+      "paper_ids": [
+        "d752a5b8b5e033668d392d3f1f8bf690ede0fc99"
+      ]
+    },
+    {
+      "id": "concept:convolutional-neural-network",
+      "name": "Convolutional Neural Network",
+      "description": "a component used to fuse historical observations by forming an encoder",
+      "first_seen_year": null,
+      "aliases": [
+        "Convolutional Neural Network"
+      ],
+      "paper_ids": [
+        "doi:10.1371/journal.pone.0318981"
+      ]
+    },
+    {
+      "id": "concept:cooperative-encirclement-and-capture",
+      "name": "Cooperative Encirclement and Capture",
+      "description": "a challenging multi-agent decision-making problem for unmanned surface vehicles",
+      "first_seen_year": null,
+      "aliases": [
+        "Cooperative Encirclement and Capture"
+      ],
+      "paper_ids": [
+        "5c987a5aa34a39dc0f1d30bde51bb5393a7b4640"
+      ]
+    },
+    {
+      "id": "concept:cooperative-platooning",
+      "name": "Cooperative Platooning",
+      "description": "a system where vehicles form a convoy to improve traffic flow and safety",
+      "first_seen_year": null,
+      "aliases": [
+        "Cooperative Platooning"
+      ],
+      "paper_ids": [
+        "doi:10.1109/cvci66304.2025.11348190"
+      ]
+    },
+    {
+      "id": "concept:decentralized-multi-agent-reinforcement-learning",
+      "name": "Decentralized Multi-Agent Reinforcement Learning",
+      "description": "a framework where multiple agents learn to make decisions in a shared environment without a central controller",
+      "first_seen_year": null,
+      "aliases": [
+        "Decentralized Multi-Agent Reinforcement Learning"
+      ],
+      "paper_ids": [
+        "1e48868bab068a3778f1a10f94bb240881ec3670"
+      ]
+    },
+    {
+      "id": "concept:deep-reinforcement-learning",
+      "name": "Deep Reinforcement Learning",
+      "description": "paradigms that perform single agents in a static environment",
+      "first_seen_year": null,
+      "aliases": [
+        "Deep Reinforcement Learning"
+      ],
+      "paper_ids": [
+        "f93cc5ab9c28218686155e5e1a9fbf0d0e1a0609"
+      ]
+    },
+    {
+      "id": "concept:denial-of-service-attacks",
+      "name": "Denial-of-Service Attacks",
+      "description": "a type of vulnerability aimed at making a system unavailable to its intended users",
+      "first_seen_year": null,
+      "aliases": [
+        "Denial-of-Service Attacks"
+      ],
+      "paper_ids": [
+        "b14689d0c5729e8496f1deec09ef99262a211ea0"
+      ]
+    },
+    {
+      "id": "concept:digital-twin",
+      "name": "Digital Twin",
+      "description": "technology used to construct a digital twin edge network (DITEN) to reflect the physical MEC system in real-time and provide data for training",
+      "first_seen_year": null,
+      "aliases": [
+        "Digital Twin"
+      ],
+      "paper_ids": [
+        "55d4c121a8cf4e9f866e84c3d5a730e3baa7e1d0"
+      ]
+    },
+    {
+      "id": "concept:digital-twin-edge-network",
+      "name": "Digital Twin Edge Network",
+      "description": "a network constructed to reflect the physical MEC system in real-time and provide data for training",
+      "first_seen_year": null,
+      "aliases": [
+        "Digital Twin Edge Network"
+      ],
+      "paper_ids": [
+        "55d4c121a8cf4e9f866e84c3d5a730e3baa7e1d0"
+      ]
+    },
+    {
+      "id": "concept:directed-acyclic-graphs",
+      "name": "Directed Acyclic Graphs",
+      "description": "a graph representation for workflows",
+      "first_seen_year": null,
+      "aliases": [
+        "Directed Acyclic Graphs"
+      ],
+      "paper_ids": [
+        "f9d2325ee2788b7ea8fac2edc17ecfde49cd03aa"
+      ]
+    },
+    {
+      "id": "concept:dueling-double-deep-q-network",
+      "name": "Dueling Double Deep Q-Network",
+      "description": "derives the final phase decisions of the signal",
+      "first_seen_year": null,
+      "aliases": [
+        "Dueling Double Deep Q-Network"
+      ],
+      "paper_ids": [
+        "ff97777c25699d27d9de36a0e7e8abcc4aeb9594"
+      ]
+    },
+    {
+      "id": "concept:dynamic-graph-neural-networks",
+      "name": "Dynamic Graph Neural Networks",
+      "description": "a type of neural network that operates on graph-structured data that changes over time",
+      "first_seen_year": null,
+      "aliases": [
+        "Dynamic Graph Neural Networks"
+      ],
+      "paper_ids": [
+        "2a8bca42351ade41f8ce5ff51387736a02540e32"
+      ]
+    },
+    {
+      "id": "concept:emotional-contagion",
+      "name": "Emotional Contagion",
+      "description": "the process by which one person's emotions and related behaviors directly trigger similar emotions and behaviors in other people",
+      "first_seen_year": null,
+      "aliases": [
+        "Emotional Contagion"
+      ],
+      "paper_ids": [
+        "2a8bca42351ade41f8ce5ff51387736a02540e32"
+      ]
+    },
+    {
+      "id": "concept:emotional-synchronization",
+      "name": "Emotional Synchronization",
+      "description": "the process of aligning emotional states between individuals",
+      "first_seen_year": null,
+      "aliases": [
+        "Emotional Synchronization"
+      ],
+      "paper_ids": [
+        "2a8bca42351ade41f8ce5ff51387736a02540e32"
+      ]
+    },
+    {
+      "id": "concept:fake-review-detection",
+      "name": "Fake review detection",
+      "description": "capabilities to identify and flag inauthentic customer reviews",
+      "first_seen_year": null,
+      "aliases": [
+        "Fake review detection"
+      ],
+      "paper_ids": [
+        "d752a5b8b5e033668d392d3f1f8bf690ede0fc99"
+      ]
+    },
+    {
+      "id": "concept:fleet-autonomy",
+      "name": "Fleet Autonomy",
+      "description": "the ability of a group of vehicles to operate independently without human intervention",
+      "first_seen_year": null,
+      "aliases": [
+        "Fleet Autonomy"
+      ],
+      "paper_ids": [
+        "doi:10.15607/rss.2023.xix.105"
+      ]
+    },
+    {
+      "id": "concept:front-running",
+      "name": "Front Running",
+      "description": "a type of vulnerability where a transaction is observed and a more profitable transaction is submitted before it",
+      "first_seen_year": null,
+      "aliases": [
+        "Front Running"
+      ],
+      "paper_ids": [
+        "b14689d0c5729e8496f1deec09ef99262a211ea0"
+      ]
+    },
+    {
+      "id": "concept:gapp",
+      "name": "GAPP",
+      "description": "a Graph Attention Network model that predicts football pass reception probabilities and provides interpretable insights into off-ball defending",
+      "first_seen_year": null,
+      "aliases": [
+        "GAPP"
+      ],
+      "paper_ids": [
+        "c56e2f255e56ebd4530f4a164a98fc015b31902e"
+      ]
+    },
+    {
+      "id": "concept:gdpr",
+      "name": "GDPR",
+      "description": "a regulation in EU law on data protection and privacy",
+      "first_seen_year": null,
+      "aliases": [
+        "GDPR"
+      ],
+      "paper_ids": [
+        "d752a5b8b5e033668d392d3f1f8bf690ede0fc99"
+      ]
+    },
+    {
+      "id": "concept:gated-recurrent-unit-gru",
+      "name": "Gated Recurrent Unit (GRU)",
+      "description": "used to convert trajectory sequences into compact representations and for multimodal trajectory forecasting",
+      "first_seen_year": null,
+      "aliases": [
+        "Gated Recurrent Unit (GRU)"
+      ],
+      "paper_ids": [
+        "f865c4676281f578de1dae7a9982d448614dd8f9"
+      ]
+    },
+    {
+      "id": "concept:graph-attention-multi-agent-proximal-policy-optimization",
+      "name": "Graph Attention Multi-Agent Proximal Policy Optimization",
+      "description": "a novel decentralized multi-agent reinforcement learning framework that integrates dynamic Graph Attention Networks (GAT) into MAPPO critic architecture for topology-aware constrained scheduling",
+      "first_seen_year": null,
+      "aliases": [
+        "Graph Attention Multi-Agent Proximal Policy Optimization"
+      ],
+      "paper_ids": [
+        "doi:10.2139/ssrn.5960262"
+      ]
+    },
+    {
+      "id": "concept:graph-attention-networks-gat",
+      "name": "Graph Attention Networks (GAT)",
+      "description": "a graph neural network model that allows for individualized consideration of interactions between agents",
+      "first_seen_year": null,
+      "aliases": [
+        "Graph Attention Networks (GAT)"
+      ],
+      "paper_ids": [
+        "8ed12766d939390b9d93084d5fd16ead8b94a9ed"
+      ]
+    },
+    {
+      "id": "concept:graph-attention-based-multi-agent-reinforcement-learning",
+      "name": "Graph Attention-based Multi-Agent Reinforcement Learning",
+      "description": "an algorithm that employs a graph attention-based value decomposition network to capture spatial relationships between edge nodes for cooperation",
+      "first_seen_year": null,
+      "aliases": [
+        "Graph Attention-based Multi-Agent Reinforcement Learning"
+      ],
+      "paper_ids": [
+        "55d4c121a8cf4e9f866e84c3d5a730e3baa7e1d0"
+      ]
+    },
+    {
+      "id": "concept:graph-convolutional-network",
+      "name": "Graph Convolutional Network",
+      "description": "a type of graph neural network that applies convolutional operations to graph-structured data",
+      "first_seen_year": null,
+      "aliases": [
+        "Graph Convolutional Network"
+      ],
+      "paper_ids": [
+        "doi:10.31224/7090"
+      ]
+    },
+    {
+      "id": "concept:graph-convolutional-networks",
+      "name": "Graph Convolutional Networks",
+      "description": "agents for feature representation of the graph-structured voltages to improve the decision accuracy in a data-efficient manner",
+      "first_seen_year": null,
+      "aliases": [
+        "Graph Convolutional Networks"
+      ],
+      "paper_ids": [
+        "f93cc5ab9c28218686155e5e1a9fbf0d0e1a0609"
+      ]
+    },
+    {
+      "id": "concept:graph-neural-networks",
+      "name": "Graph Neural Networks",
+      "description": "a type of neural network that operates on graph-structured data",
+      "first_seen_year": null,
+      "aliases": [
+        "Graph Neural Networks"
+      ],
+      "paper_ids": [
+        "f9d2325ee2788b7ea8fac2edc17ecfde49cd03aa"
+      ]
+    },
+    {
+      "id": "concept:grid-emergency-voltage-control",
+      "name": "Grid Emergency Voltage Control",
+      "description": "a paramount task in electric power systems to improve voltage stability and prevent cascading outages and blackouts in case of contingencies",
+      "first_seen_year": null,
+      "aliases": [
+        "Grid Emergency Voltage Control"
+      ],
+      "paper_ids": [
+        "f93cc5ab9c28218686155e5e1a9fbf0d0e1a0609"
+      ]
+    },
+    {
+      "id": "concept:heterogeneous-graph-attention-networks",
+      "name": "Heterogeneous graph attention networks",
+      "description": "a model architecture that captures complex relationships between various data types through specialized attention mechanisms",
+      "first_seen_year": null,
+      "aliases": [
+        "Heterogeneous graph attention networks"
+      ],
+      "paper_ids": [
+        "d752a5b8b5e033668d392d3f1f8bf690ede0fc99"
+      ]
+    },
+    {
+      "id": "concept:hierarchical-graph-attention-network-hgat",
+      "name": "Hierarchical Graph Attention Network (HGAT)",
+      "description": "a graph neural network architecture that incorporates hierarchical structures and attention mechanisms",
+      "first_seen_year": null,
+      "aliases": [
+        "Hierarchical Graph Attention Network (HGAT)"
+      ],
+      "paper_ids": [
+        "b14689d0c5729e8496f1deec09ef99262a211ea0"
+      ]
+    },
+    {
+      "id": "concept:hierarchical-variational-autoencoder",
+      "name": "Hierarchical Variational Autoencoder",
+      "description": "a generative model that learns a compressed representation of data in a hierarchical manner",
+      "first_seen_year": null,
+      "aliases": [
+        "Hierarchical Variational Autoencoder"
+      ],
+      "paper_ids": [
+        "2a8bca42351ade41f8ce5ff51387736a02540e32"
+      ]
+    },
+    {
+      "id": "concept:hybrid-coordinated-spatio-temporal-graph-reinforcement-learning",
+      "name": "Hybrid Coordinated Spatio-Temporal Graph Reinforcement Learning",
+      "description": "a novel framework that integrates GRU, GAT, and 3DQN for multi-agent traffic control",
+      "first_seen_year": null,
+      "aliases": [
+        "Hybrid Coordinated Spatio-Temporal Graph Reinforcement Learning"
+      ],
+      "paper_ids": [
+        "ff97777c25699d27d9de36a0e7e8abcc4aeb9594"
+      ]
+    },
+    {
+      "id": "concept:hybrid-reward-function",
+      "name": "Hybrid Reward Function",
+      "description": "a reward function that combines multiple objectives, in this case, traffic efficiency for social vehicles and priority for emergency vehicles",
+      "first_seen_year": null,
+      "aliases": [
+        "Hybrid Reward Function"
+      ],
+      "paper_ids": [
+        "1e48868bab068a3778f1a10f94bb240881ec3670"
+      ]
+    },
+    {
+      "id": "concept:industrial-internet-of-things",
+      "name": "Industrial Internet of Things",
+      "description": "a network of interconnected industrial devices and sensors",
+      "first_seen_year": null,
+      "aliases": [
+        "Industrial Internet of Things"
+      ],
+      "paper_ids": [
+        "doi:10.2139/ssrn.5960262"
+      ]
+    },
+    {
+      "id": "concept:l2af",
+      "name": "L2AF",
+      "description": "Graph-Attention Modulated Learning Automata for efficient multi-agent cooperation",
+      "first_seen_year": null,
+      "aliases": [
+        "L2AF"
+      ],
+      "paper_ids": [
+        "doi:10.1016/j.neunet.2026.109676"
+      ]
+    },
+    {
+      "id": "concept:learning-automata",
+      "name": "Learning Automata",
+      "description": "a type of adaptive control system that learns optimal behavior through interaction with an environment",
+      "first_seen_year": null,
+      "aliases": [
+        "Learning Automata"
+      ],
+      "paper_ids": [
+        "doi:10.1016/j.neunet.2026.109676"
+      ]
+    },
+    {
+      "id": "concept:mappo",
+      "name": "MAPPO",
+      "description": "a multi-agent actor-critic algorithm used for training agents",
+      "first_seen_year": null,
+      "aliases": [
+        "MAPPO"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-8814483/v1"
+      ]
+    },
+    {
+      "id": "concept:mat-gat",
+      "name": "MAT-GAT",
+      "description": "a model that leverages Graph Attention Networks (GAT) within the Multi-Agent Transformer (MAT) framework to improve MARL performance",
+      "first_seen_year": null,
+      "aliases": [
+        "MAT-GAT"
+      ],
+      "paper_ids": [
+        "8ed12766d939390b9d93084d5fd16ead8b94a9ed"
+      ]
+    },
+    {
+      "id": "concept:markov-game",
+      "name": "Markov game",
+      "description": "a game-theoretic framework used to model sequential decision-making problems with multiple agents in an uncertain environment",
+      "first_seen_year": null,
+      "aliases": [
+        "Markov game"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-10945491/v1"
+      ]
+    },
+    {
+      "id": "concept:multi-agent-path-finding",
+      "name": "Multi-Agent Path Finding",
+      "description": "an algorithm that must efficiently plan paths for multiple agents while adhering to constraints, ensuring safe navigation from start to goal",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-Agent Path Finding"
+      ],
+      "paper_ids": [
+        "doi:10.1371/journal.pone.0318981"
+      ]
+    },
+    {
+      "id": "concept:multi-agent-soft-actor-critic-with-graph-attention-networks",
+      "name": "Multi-Agent Soft Actor-Critic with Graph Attention Networks",
+      "description": "a new framework that unites the sample efficiency and stability of Soft Actor-Critic with the relational modelling ability of Graph Attention Networks",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-Agent Soft Actor-Critic with Graph Attention Networks"
+      ],
+      "paper_ids": [
+        "d63daa8c1e2c3f7d0e6e2cce7f770eedcd4907bb"
+      ]
+    },
+    {
+      "id": "concept:multi-agent-transformer-mat",
+      "name": "Multi-Agent Transformer (MAT)",
+      "description": "a framework for multi-agent reinforcement learning that uses sequence modeling and self-attention mechanisms to represent inter-agent relationships",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-Agent Transformer (MAT)"
+      ],
+      "paper_ids": [
+        "8ed12766d939390b9d93084d5fd16ead8b94a9ed"
+      ]
+    },
+    {
+      "id": "concept:multi-agent-deep-reinforcement-learning",
+      "name": "Multi-agent deep reinforcement learning",
+      "description": "a type of reinforcement learning where multiple agents learn to interact and make decisions in an environment",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-agent deep reinforcement learning"
+      ],
+      "paper_ids": [
+        "doi:10.3390/systems14010047"
+      ]
+    },
+    {
+      "id": "concept:multi-agent-federated-learning",
+      "name": "Multi-agent federated learning",
+      "description": "a system for collaborative model training across distributed platforms while maintaining data locality",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-agent federated learning"
+      ],
+      "paper_ids": [
+        "d752a5b8b5e033668d392d3f1f8bf690ede0fc99"
+      ]
+    },
+    {
+      "id": "concept:multi-objective-optimization",
+      "name": "Multi-objective optimization",
+      "description": "optimization involving multiple conflicting objectives",
+      "first_seen_year": null,
+      "aliases": [
+        "Multi-objective optimization"
+      ],
+      "paper_ids": [
+        "f9d2325ee2788b7ea8fac2edc17ecfde49cd03aa"
+      ]
+    },
+    {
+      "id": "concept:openai-gym-environment",
+      "name": "OpenAI Gym environment",
+      "description": "a customized environment for training and evaluation of real-time traffic observations",
+      "first_seen_year": null,
+      "aliases": [
+        "OpenAI Gym environment"
+      ],
+      "paper_ids": [
+        "d63daa8c1e2c3f7d0e6e2cce7f770eedcd4907bb"
+      ]
+    },
+    {
+      "id": "concept:openstreetmap",
+      "name": "OpenStreetMap",
+      "description": "a collaborative project to create a free, editable map of the world",
+      "first_seen_year": null,
+      "aliases": [
+        "OpenStreetMap"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-10945491/v1"
+      ]
+    },
+    {
+      "id": "concept:overall-equipment-effectiveness",
+      "name": "Overall Equipment Effectiveness",
+      "description": "a key performance indicator used in manufacturing to measure the efficiency of production processes",
+      "first_seen_year": null,
+      "aliases": [
+        "Overall Equipment Effectiveness"
+      ],
+      "paper_ids": [
+        "doi:10.2139/ssrn.5960262"
+      ]
+    },
+    {
+      "id": "concept:pcb-routing",
+      "name": "PCB Routing",
+      "description": "the process of determining the physical layout of electrical connections on a printed circuit board",
+      "first_seen_year": null,
+      "aliases": [
+        "PCB Routing"
+      ],
+      "paper_ids": [
+        "doi:10.1109/ecie69549.2026.11565623"
+      ]
+    },
+    {
+      "id": "concept:partially-observable-environment",
+      "name": "Partially Observable Environment",
+      "description": "an environment where agents do not have complete information about the state of the system",
+      "first_seen_year": null,
+      "aliases": [
+        "Partially Observable Environment"
+      ],
+      "paper_ids": [
+        "1e48868bab068a3778f1a10f94bb240881ec3670"
+      ]
+    },
+    {
+      "id": "concept:proximal-policy-optimization",
+      "name": "Proximal Policy Optimization",
+      "description": "a policy gradient method for reinforcement learning",
+      "first_seen_year": null,
+      "aliases": [
+        "Proximal Policy Optimization"
+      ],
+      "paper_ids": [
+        "f9d2325ee2788b7ea8fac2edc17ecfde49cd03aa"
+      ]
+    },
+    {
+      "id": "concept:qmix",
+      "name": "QMIX",
+      "description": "a state-of-the-art baseline for multi-agent reinforcement learning",
+      "first_seen_year": null,
+      "aliases": [
+        "QMIX"
+      ],
+      "paper_ids": [
+        "8ed12766d939390b9d93084d5fd16ead8b94a9ed"
+      ]
+    },
+    {
+      "id": "concept:rvo-gat-marl",
+      "name": "RVO-GAT-MARl",
+      "description": "a novel approach for scalable multi-agent formation navigation",
+      "first_seen_year": null,
+      "aliases": [
+        "RVO-GAT-MARl"
+      ],
+      "paper_ids": [
+        "doi:10.1109/icrae67496.2025.00033"
+      ]
+    },
+    {
+      "id": "concept:reentrancy-attacks",
+      "name": "Reentrancy Attacks",
+      "description": "a type of vulnerability where a contract can be called recursively before the initial execution completes",
+      "first_seen_year": null,
+      "aliases": [
+        "Reentrancy Attacks"
+      ],
+      "paper_ids": [
+        "b14689d0c5729e8496f1deec09ef99262a211ea0"
+      ]
+    },
+    {
+      "id": "concept:reputation-management",
+      "name": "Reputation management",
+      "description": "strategies for monitoring and influencing public perception of a business",
+      "first_seen_year": null,
+      "aliases": [
+        "Reputation management"
+      ],
+      "paper_ids": [
+        "d752a5b8b5e033668d392d3f1f8bf690ede0fc99"
+      ]
+    },
+    {
+      "id": "concept:resource-scheduling",
+      "name": "Resource Scheduling",
+      "description": "the process of allocating resources to tasks or users",
+      "first_seen_year": null,
+      "aliases": [
+        "Resource Scheduling"
+      ],
+      "paper_ids": [
+        "doi:10.2139/ssrn.5960262"
+      ]
+    },
+    {
+      "id": "concept:sumo-simulator",
+      "name": "SUMO simulator",
+      "description": "a microscopic traffic simulation suite used for modeling and testing traffic control strategies",
+      "first_seen_year": null,
+      "aliases": [
+        "SUMO simulator"
+      ],
+      "paper_ids": [
+        "doi:10.3390/systems14010047"
+      ]
+    },
+    {
+      "id": "concept:self-attention-mechanisms",
+      "name": "Self-attention mechanisms",
+      "description": "mechanisms used in sequence modeling to represent relationships between elements in a sequence",
+      "first_seen_year": null,
+      "aliases": [
+        "Self-attention mechanisms"
+      ],
+      "paper_ids": [
+        "8ed12766d939390b9d93084d5fd16ead8b94a9ed"
+      ]
+    },
+    {
+      "id": "concept:sentiment-analysis",
+      "name": "Sentiment analysis",
+      "description": "the process of determining the emotional tone behind a body of text",
+      "first_seen_year": null,
+      "aliases": [
+        "Sentiment analysis"
+      ],
+      "paper_ids": [
+        "d752a5b8b5e033668d392d3f1f8bf690ede0fc99"
+      ]
+    },
+    {
+      "id": "concept:service-level-agreement",
+      "name": "Service Level Agreement",
+      "description": "a contract that defines the level of service expected from a service provider",
+      "first_seen_year": null,
+      "aliases": [
+        "Service Level Agreement"
+      ],
+      "paper_ids": [
+        "doi:10.2139/ssrn.5960262"
+      ]
+    },
+    {
+      "id": "concept:smart-contract-vulnerabilities",
+      "name": "Smart Contract Vulnerabilities",
+      "description": "security flaws in smart contracts that can be exploited",
+      "first_seen_year": null,
+      "aliases": [
+        "Smart Contract Vulnerabilities"
+      ],
+      "paper_ids": [
+        "b14689d0c5729e8496f1deec09ef99262a211ea0"
+      ]
+    },
+    {
+      "id": "concept:social-state-refinement-ssr-module",
+      "name": "Social State Refinement (SSR) module",
+      "description": "a module for modeling social influence and incorporating goal information between agents",
+      "first_seen_year": null,
+      "aliases": [
+        "Social State Refinement (SSR) module"
+      ],
+      "paper_ids": [
+        "f865c4676281f578de1dae7a9982d448614dd8f9"
+      ]
+    },
+    {
+      "id": "concept:soft-actor-critic",
+      "name": "Soft Actor-Critic",
+      "description": "a reinforcement learning algorithm known for sample efficiency and stability",
+      "first_seen_year": null,
+      "aliases": [
+        "Soft Actor-Critic"
+      ],
+      "paper_ids": [
+        "d63daa8c1e2c3f7d0e6e2cce7f770eedcd4907bb"
+      ]
+    },
+    {
+      "id": "concept:spatial-temporal-graph-attention-network",
+      "name": "Spatial-Temporal Graph Attention Network",
+      "description": "a network architecture for PCB routing",
+      "first_seen_year": null,
+      "aliases": [
+        "Spatial-Temporal Graph Attention Network"
+      ],
+      "paper_ids": [
+        "doi:10.1109/ecie69549.2026.11565623"
+      ]
+    },
+    {
+      "id": "concept:spatiotemporal-graph-attention-network",
+      "name": "Spatiotemporal Graph Attention Network",
+      "description": "a model that applies graph attention mechanisms to spatiotemporal data",
+      "first_seen_year": null,
+      "aliases": [
+        "Spatiotemporal Graph Attention Network"
+      ],
+      "paper_ids": [
+        "doi:10.31224/7090"
+      ]
+    },
+    {
+      "id": "concept:starcraft-multi-agent-challenge-smac",
+      "name": "StarCraft Multi-Agent Challenge (SMAC)",
+      "description": "a benchmark suite for evaluating multi-agent reinforcement learning algorithms",
+      "first_seen_year": null,
+      "aliases": [
+        "StarCraft Multi-Agent Challenge (SMAC)"
+      ],
+      "paper_ids": [
+        "8ed12766d939390b9d93084d5fd16ead8b94a9ed"
+      ]
+    },
+    {
+      "id": "concept:temporal-affective-resonance-networks-tarn",
+      "name": "Temporal Affective Resonance Networks (TARN)",
+      "description": "a novel architecture that models emotional contagion and synchronization between humans and multiple AI agents",
+      "first_seen_year": null,
+      "aliases": [
+        "Temporal Affective Resonance Networks (TARN)"
+      ],
+      "paper_ids": [
+        "2a8bca42351ade41f8ce5ff51387736a02540e32"
+      ]
+    },
+    {
+      "id": "concept:temporal-consistency-loss-function",
+      "name": "Temporal Consistency Loss Function",
+      "description": "a loss function designed to ensure smooth transitions in temporal data",
+      "first_seen_year": null,
+      "aliases": [
+        "Temporal Consistency Loss Function"
+      ],
+      "paper_ids": [
+        "2a8bca42351ade41f8ce5ff51387736a02540e32"
+      ]
+    },
+    {
+      "id": "concept:traffic-flow-prediction",
+      "name": "Traffic flow prediction",
+      "description": "forecasting future traffic conditions based on historical and current data",
+      "first_seen_year": null,
+      "aliases": [
+        "Traffic flow prediction"
+      ],
+      "paper_ids": [
+        "doi:10.3390/systems14010047"
+      ]
+    },
+    {
+      "id": "concept:transformer-encoder",
+      "name": "Transformer encoder",
+      "description": "used to convert trajectory sequences into compact representations",
+      "first_seen_year": null,
+      "aliases": [
+        "Transformer encoder"
+      ],
+      "paper_ids": [
+        "f865c4676281f578de1dae7a9982d448614dd8f9"
+      ]
+    },
+    {
+      "id": "concept:two-stage-deep-reinforcement-learning",
+      "name": "Two-Stage Deep Reinforcement Learning",
+      "description": "a DRL approach for dynamic scheduling",
+      "first_seen_year": null,
+      "aliases": [
+        "Two-Stage Deep Reinforcement Learning"
+      ],
+      "paper_ids": [
+        "f9d2325ee2788b7ea8fac2edc17ecfde49cd03aa"
+      ]
+    },
+    {
+      "id": "concept:urllc",
+      "name": "URLLC",
+      "description": "Ultra-Reliable Low-Latency Communication",
+      "first_seen_year": null,
+      "aliases": [
+        "URLLC"
+      ],
+      "paper_ids": [
+        "doi:10.2139/ssrn.5960262"
+      ]
+    },
+    {
+      "id": "concept:unchecked-low-level-calls",
+      "name": "Unchecked Low-Level Calls",
+      "description": "a vulnerability arising from the misuse of low-level calls in smart contracts",
+      "first_seen_year": null,
+      "aliases": [
+        "Unchecked Low-Level Calls"
+      ],
+      "paper_ids": [
+        "b14689d0c5729e8496f1deec09ef99262a211ea0"
+      ]
+    },
+    {
+      "id": "concept:unmanned-surface-vehicles",
+      "name": "Unmanned Surface Vehicles",
+      "description": "vehicles participating in maritime patrol and search-and-rescue missions",
+      "first_seen_year": null,
+      "aliases": [
+        "Unmanned Surface Vehicles"
+      ],
+      "paper_ids": [
+        "5c987a5aa34a39dc0f1d30bde51bb5393a7b4640"
+      ]
+    },
+    {
+      "id": "concept:wt-gwo-cnn-lstm",
+      "name": "WT-GWO-CNN-LSTM",
+      "description": "a traffic forecasting module that predicts near-future traffic states",
+      "first_seen_year": null,
+      "aliases": [
+        "WT-GWO-CNN-LSTM"
+      ],
+      "paper_ids": [
+        "doi:10.3390/systems14010047"
+      ]
+    },
+    {
+      "id": "concept:xlm-roberta-large",
+      "name": "XLM-RoBERTa large",
+      "description": "a baseline model for cross-lingual natural language understanding",
+      "first_seen_year": null,
+      "aliases": [
+        "XLM-RoBERTa large"
+      ],
+      "paper_ids": [
+        "d752a5b8b5e033668d392d3f1f8bf690ede0fc99"
+      ]
+    },
+    {
+      "id": "concept:ego-centric-graph-attention",
+      "name": "ego-centric graph attention",
+      "description": "a method that generates dynamic graphs from an agent's perspective, considering proximity and role importance",
+      "first_seen_year": null,
+      "aliases": [
+        "ego-centric graph attention"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-8814483/v1"
+      ]
+    },
+    {
+      "id": "concept:escape-interdiction",
+      "name": "escape interdiction",
+      "description": "a fundamental problem in urban security and transportation systems where limited law-enforcement resources must be allocated efficiently to intercept an offender attempting to escape through a transpo",
+      "first_seen_year": null,
+      "aliases": [
+        "escape interdiction"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-10945491/v1"
+      ]
+    },
+    {
+      "id": "concept:game-theoretic-optimization",
+      "name": "game-theoretic optimization",
+      "description": "optimization techniques that consider strategic interactions between multiple decision-makers",
+      "first_seen_year": null,
+      "aliases": [
+        "game-theoretic optimization"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-10945491/v1"
+      ]
+    },
+    {
+      "id": "concept:gap-acceptance",
+      "name": "gap acceptance",
+      "description": "a safety-critical decision in which a driver on a stop-controlled approach must judge whether the available time headway in a conflicting traffic stream is sufficient to cross safely",
+      "first_seen_year": null,
+      "aliases": [
+        "gap acceptance"
+      ],
+      "paper_ids": [
+        "doi:10.31224/7090"
+      ]
+    },
+    {
+      "id": "concept:generalized-advantage-estimation",
+      "name": "generalized advantage estimation",
+      "description": "a technique used to reduce variance in reinforcement learning policy updates",
+      "first_seen_year": null,
+      "aliases": [
+        "generalized advantage estimation"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-8814483/v1"
+      ]
+    },
+    {
+      "id": "concept:graph-attention",
+      "name": "graph attention",
+      "description": "a machine learning model that infers network topology in multi-agent systems",
+      "first_seen_year": null,
+      "aliases": [
+        "graph attention"
+      ],
+      "paper_ids": [
+        "arxiv:2408.15449v2"
+      ]
+    },
+    {
+      "id": "concept:graph-search-algorithms",
+      "name": "graph-search algorithms",
+      "description": "algorithms that traverse or search graph data structures",
+      "first_seen_year": null,
+      "aliases": [
+        "graph-search algorithms"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-10945491/v1"
+      ]
+    },
+    {
+      "id": "concept:link-prediction",
+      "name": "link prediction",
+      "description": "a task used to evaluate the identification of network topology",
+      "first_seen_year": null,
+      "aliases": [
+        "link prediction"
+      ],
+      "paper_ids": [
+        "arxiv:2408.15449v2"
+      ]
+    },
+    {
+      "id": "concept:logistic-regression",
+      "name": "logistic regression",
+      "description": "a statistical model used for binary classification",
+      "first_seen_year": null,
+      "aliases": [
+        "logistic regression"
+      ],
+      "paper_ids": [
+        "doi:10.31224/7090"
+      ]
+    },
+    {
+      "id": "concept:mixed-integer-linear-programming",
+      "name": "mixed-integer linear programming",
+      "description": "a mathematical optimization technique used for solving problems that can be modeled as a linear program with integer constraints",
+      "first_seen_year": null,
+      "aliases": [
+        "mixed-integer linear programming"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-10945491/v1"
+      ]
+    },
+    {
+      "id": "concept:node-representation-learning",
+      "name": "node representation learning",
+      "description": "learning representations for nodes in a graph",
+      "first_seen_year": null,
+      "aliases": [
+        "node representation learning"
+      ],
+      "paper_ids": [
+        "arxiv:2408.15449v2"
+      ]
+    },
+    {
+      "id": "concept:partially-observable-3d-environments",
+      "name": "partially observable 3D environments",
+      "description": "environments where agents have incomplete information about the state of the world",
+      "first_seen_year": null,
+      "aliases": [
+        "partially observable 3D environments"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-8814483/v1"
+      ]
+    },
+    {
+      "id": "concept:quadrotor-navigation",
+      "name": "quadrotor navigation",
+      "description": "the process of controlling the movement of quadrotor drones",
+      "first_seen_year": null,
+      "aliases": [
+        "quadrotor navigation"
+      ],
+      "paper_ids": [
+        "doi:10.21203/rs.3.rs-8814483/v1"
+      ]
+    },
+    {
+      "id": "concept:scene-graph",
+      "name": "scene graph",
+      "description": "a graph representation of a scene where nodes represent agents and edges represent relationships between them",
+      "first_seen_year": null,
+      "aliases": [
+        "scene graph"
+      ],
+      "paper_ids": [
+        "doi:10.31224/7090"
+      ]
+    }
+  ],
+  "decisions": []
+}
