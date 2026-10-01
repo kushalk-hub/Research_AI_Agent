@@ -35,8 +35,10 @@ rla doctor --llm
 Probes every configured model with a real request. **Costs 3 requests** (fast, answer,
 embedding) and is deliberately uncached, so a green light means a request went out *now*.
 
-**Currently fails on the free tier** — both Gemini models report their daily quota spent.
-This is the expected state until the daily reset or a paid key.
+**Verified 2026-10-01: green.** `structured gemini-2.5-flash-lite ok`, `answer
+gemini-2.5-flash ok`, `embedding gemini-embedding-001 ok (3072 dims)`. The free tier allows
+~20 requests per model per day, so this goes red again once the daily allowance is spent —
+that is the expected state, and it is different from a bad key.
 
 ---
 
@@ -61,7 +63,11 @@ rla build -t "Graph Attention Networks"
 Fans out across all sources, dedupes by DOI and title, and writes `data/corpus.json`.
 Takes a minute or two. Prints per-source yield.
 
-**Verified on this machine:** 100 papers, 100 with abstracts, 98 with DOIs.
+**Verified on this machine:** the corpus cap in `.env` is `RLA_TARGET_CORPUS_MIN=15` /
+`RLA_TARGET_CORPUS_MAX=30`, so a build yields **30 papers, 30 abstracts, 30 years, 29 DOIs**
+(per-source yield: Semantic Scholar 25, OpenAlex 25, arXiv 20, CrossRef 15; DBLP contributes 0 —
+it is behind bot protection, and `rla sources` says so). Raise the two settings to 40/100 for the
+spec's original 40-100 range.
 
 ---
 
@@ -86,12 +92,15 @@ Machine-readable, for piping into jq or a log:
 rla run -t "Graph Attention Networks" --jsonl
 ```
 
-**Verified on this machine:** completes end to end and builds a real graph —
-`206 nodes (100 papers, 106 concepts), 323 edges (0 citation, 182 derived)`.
+**Verified 2026-10-01:** completes end to end and builds a real graph —
+`135 nodes (30 papers, 105 concepts), 104 edges (64 citation, 40 derived)`, all 30 papers
+carrying relevance scores 3/4/5, so the LLM scoring stage genuinely ran.
 
-> Because the daily quota is spent, extraction reports `0/100 papers` and resolution
-> falls back to name-only. The graph is still built from the corpus. On a paid key the
-> same command populates concepts and lineage edges.
+> **Caveat on this machine's committed data.** `data/extractions.jsonl` and `data/corpus.json`
+> currently describe **different corpora** (zero shared paper ids), and `add_relations` silently
+> skips relations whose endpoint is absent. The result is a graph with zero `INTRODUCES`/`USES`
+> edges and null concept years. See the recovery recipe in
+> [`OPERATIONS_GUIDE.md`](OPERATIONS_GUIDE.md) §5. Fix it before demoing lineage.
 
 ---
 
@@ -107,10 +116,13 @@ Requires `data/graph/graph.json`, so run step 4 or 5 first. Traversal is free an
 runs; the narrative needs a key. Answers stream with `[C5]`-style citations, and any
 citation id not in the subgraph is stripped and reported.
 
-**Verified on this machine:** traverses 14 nodes / 20 edges and streams a cited answer.
+**Verified 2026-10-01:** classifies LINEAGE, streams a cited answer naming `[C5]`, `[C11]`,
+`[C14]` and others, and correctly self-reports the one thing it cannot do — order the chain
+chronologically — because concept years are null in the current graph.
 
-The four question types map to different traversals — lineage, gap, comparison, overview.
-`rla ask` classifies automatically; the traversal is pure code, no model needed.
+**Five** question types map to different traversals — lineage, gap, comparison, approaches,
+full-report. `rla ask` classifies automatically from keywords; the traversal is pure code, no model
+needed.
 
 ---
 
@@ -122,8 +134,10 @@ rla report --jsonl        # machine-readable
 ```
 
 Reads the corpus and stored extractions, no LLM calls. **Currently reports 26 papers
-analysed, 0 stating a limitation** — a real finding about the current extraction store,
-not a failure. Depends entirely on what has been extracted.
+analysed, 0 stating a limitation, 0 themes, 0 structural gaps** — a real finding about the
+current extraction store, not a failure: every stored `stated_limitation` is empty, and every
+concept's `first_seen_year` is null, so nothing can be old enough to count as abandoned.
+See `PLAN.md` P2/P4 before presenting this as a demo of gap analysis.
 
 ---
 
@@ -161,7 +175,7 @@ Keys: `q` quit, `c` clear log.
 ## 10. Developer commands
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -q               # 508 tests, ~70s
+.\.venv\Scripts\python.exe -m pytest tests/ -q               # 529 tests, ~68s
 .\.venv\Scripts\python.exe -m ruff check src/ tests/         # lint
 
 # focused
@@ -207,7 +221,7 @@ See `docs/llm_provider_migration_plan.md` for the design and
 
 1. `rla doctor` — show the provider, models, and that it degrades without a key.
 2. `rla sources` — show which academic APIs actually respond right now.
-3. `rla stats` — the corpus already has 100 papers committed.
+3. `rla stats` — the corpus is already built and committed (30 papers at the current cap).
 4. `rla run -t "Graph Attention Networks"` — the event stream building a real graph.
 5. `rla stats` again — node and edge counts went from nothing to 206/323.
 6. `rla ask "how did graph attention networks evolve?"` — a cited answer streaming in.

@@ -220,7 +220,7 @@ built a graph. That path is gitignored, so a fresh clone has no graph.
 ## Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -q      # 507 tests, ~70s
+.\.venv\Scripts\python.exe -m pytest tests/ -q      # 529 tests, ~68s
 .\.venv\Scripts\python.exe -m ruff check src/ tests/  # lint
 ```
 
@@ -258,6 +258,8 @@ Sources, stores, and the evaluation harness are unchanged by the routing work.
 | Document | What it covers |
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | Conventions and gotchas for coding agents |
+| [`docs/OPERATIONS_GUIDE.md`](docs/OPERATIONS_GUIDE.md) | **Start here.** Every way to run the pipeline, how model routing works, every limit and how to change it |
+| [`docs/demo_commands.md`](docs/demo_commands.md) | Command-by-command manual checks with expected output |
 | [`docs/llm_architecture_audit.md`](docs/llm_architecture_audit.md) | Audit of the LLM layer before the migration |
 | [`docs/llm_provider_migration_plan.md`](docs/llm_provider_migration_plan.md) | Migration design, ADRs, rollback |
 | [`docs/llm_provider_validation.md`](docs/llm_provider_validation.md) | Real-provider validation results |
