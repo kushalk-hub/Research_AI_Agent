@@ -129,3 +129,59 @@ def test_cli_help_runs():
     )
     assert result.returncode == 0, result.stderr
     assert "research literature agent" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# P9 gate: the orchestrator must not pin a model
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# P9 gate: the orchestrator must not pin a model
+# ---------------------------------------------------------------------------
+
+
+async def _extraction_model_for(settings, cache):
+    """The model id extraction actually asks the client for."""
+    from rla.models import Corpus, Paper
+    from rla.pipeline.extraction import PaperFacts
+
+    recorded: list[str | None] = []
+
+    class RecordingLLM:
+        async def generate_structured(
+            self, prompt, schema, *, model=None, temperature=0.0, stage="llm", retries=2
+        ):
+            recorded.append(model)
+            return PaperFacts(summary="s")
+
+    pipeline = Pipeline(settings, RecordingLLM(), cache, CostTracker())
+    result = PipelineResult()
+    result.corpus = Corpus(title="t", papers=[Paper(id="p1", title="A", abstract="text")])
+
+    [_ async for _ in pipeline._run_extraction(result)]
+    assert recorded, "extraction never reached the client"
+    return recorded[0]
+
+
+async def test_extraction_uses_the_configured_structured_model(settings, cache):
+    """An explicit `model=` beats the stage's configured role in the router.
+
+    The orchestrator passed `strong_model` into extraction and resolution, so
+    `RLA_STRUCTURED_MODEL` never reached either stage -- including extraction,
+    which is by far the largest consumer of requests. That is what makes it
+    impossible to move the expensive stage onto a model that still has daily
+    quota by configuration alone.
+    """
+    chosen = settings.model_copy(
+        update={"structured_model": "the-model-the-operator-chose", "strong_model": "pinned"}
+    )
+    assert await _extraction_model_for(chosen, cache) == "the-model-the-operator-chose"
+
+
+async def test_extraction_falls_back_to_the_fast_model_not_the_strong_one(settings, cache):
+    """The structured stages are the bulk of the volume, so their default is the
+    cheap tier. Defaulting them to `strong_model` is what made a 30-paper corpus
+    unaffordable on the 20-requests-per-day free tier."""
+    defaulted = settings.model_copy(update={"structured_model": ""})
+    assert await _extraction_model_for(defaulted, cache) == defaulted.fast_model

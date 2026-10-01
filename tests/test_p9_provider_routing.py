@@ -588,3 +588,107 @@ class _NoWait:
 
     async def acquire(self) -> None:
         return None
+
+
+# ---------------------------------------------------------------------------
+# The documented quota escape hatch
+# ---------------------------------------------------------------------------
+
+#: A real per-day Gemini 429, as captured from the live API on 2026-10-01. The
+#: `quotaId` and `quotaValue` are the load-bearing parts: 20 requests per day, per
+#: project, per model.
+LIVE_DAILY_429 = (
+    "429 RESOURCE_EXHAUSTED: Quota exceeded for metric: generativelanguage."
+    "googleapis.com/generate_content_free_tier_requests, limit: 20, model: "
+    "gemini-2.5-flash-lite\nPlease retry in 53.6s., details: [{'@type': "
+    "'type.googleapis.com/google.rpc.QuotaFailure', 'violations': [{'quotaMetric': "
+    "'generativelanguage.googleapis.com/generate_content_free_tier_requests', "
+    "'quotaId': 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', 'quotaValue': "
+    "'20'}]}]"
+)
+
+
+async def test_the_documented_quota_escape_hatch_actually_fires(tmp_path):
+    """`RLA_FALLBACK_ON_QUOTA=1` is documented as the way out of a spent daily cap.
+
+    It could not fire. The retry layer re-raised its own text-only message, the
+    router saw UNKNOWN instead of QUOTA_EXHAUSTED, and UNKNOWN is not
+    fallback-eligible -- so the opt-in was dead code. Driven through the *real*
+    retry layer because the defect lived in the gap between the two, not in a rule
+    either of them got wrong.
+    """
+    from rla.llm.retry import call_with_retry
+
+    class RetryingBackend(FakeBackend):
+        async def generate_text(self, prompt, *, model, temperature, stage):
+            self.calls.append((stage, model))
+
+            def _invoke() -> str:
+                if model in self.fail:
+                    raise self.fail[model]
+                return f"text from {model}"
+
+            return await call_with_retry(
+                _invoke, stage=stage, max_retries=5, limiter=_NoWait()
+            ), None
+
+    backend = RetryingBackend(fail={"gemini-2.5-flash-lite": RuntimeError(LIVE_DAILY_429)})
+    router = make_router(backend, tmp_path, fallback_on_quota=True)
+
+    text = await router.generate_text("x", stage="extraction")
+
+    assert text == "text from gemini-2.5-flash"
+    assert router.fallbacks, "the opt-in must produce a real failover"
+
+
+async def test_a_self_hosted_model_can_be_declared_structured_capable(tmp_path):
+    """A local server cannot be reached at all without this.
+
+    LiteLLM's `supports_response_schema()` returns False for any model it has no
+    static entry for -- including a local llama.cpp/Ollama server that honours
+    `response_format` perfectly well. The gate then refuses, and since scoring,
+    extraction and resolution are all structured stages, the model becomes
+    unusable for exactly the work a local model is wanted for.
+    """
+    from rla.llm.litellm_backend import LiteLLMBackend
+
+    settings = Settings(
+        gemini_api_key="k",
+        data_dir=tmp_path,
+        llm_provider="litellm",
+        structured_output_models="openai/qwen3:4b",
+        llm_base_urls='{"openai": "http://localhost:11434/v1"}',
+    )
+    backend = LiteLLMBackend(settings)
+
+    assert backend.supports("openai/qwen3:4b", "supports_structured_output") is True
+
+
+async def test_the_opt_in_covers_both_spellings_and_nothing_else(tmp_path):
+    """A bare id is how this project writes its defaults, so one entry has to
+    cover both spellings -- and it must not widen the gate to unrelated models.
+
+    Asserted on the settings predicate rather than on LiteLLM's own answer:
+    `supports_response_schema()` is load-order dependent for models LiteLLM has
+    no entry for, returning different values depending on what earlier code in the
+    process already touched. That instability is the reason the operator
+    declaration exists at all, so a test that depended on it would be flaky.
+    """
+    settings = Settings(
+        gemini_api_key="k",
+        data_dir=tmp_path,
+        structured_output_models="qwen3:4b",
+    )
+
+    assert settings.declares_structured_output("qwen3:4b") is True
+    assert settings.declares_structured_output("openai/qwen3:4b") is True
+    assert settings.declares_structured_output("openai/other") is False
+    assert settings.declares_structured_output("gemini-2.5-flash") is False
+
+
+async def test_an_empty_opt_in_declares_nothing(tmp_path):
+    """The default must be silence, so ADR-004's refusal is untouched."""
+    settings = Settings(gemini_api_key="k", data_dir=tmp_path, structured_output_models="")
+
+    assert settings.declared_structured_models() == []
+    assert settings.declares_structured_output("openai/qwen3:4b") is False

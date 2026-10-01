@@ -251,3 +251,46 @@ def test_an_unrecognised_prefix_is_still_accepted_by_the_base_url_map():
     """
     s = settings_with(json.dumps({"local": "http://localhost:8000/v1"}))
     assert s.base_url_for("local/my-model") == "http://localhost:8000/v1"
+
+
+# ---------------------------------------------------------------------------
+# A bare id names its own provider
+# ---------------------------------------------------------------------------
+
+
+def test_a_bare_id_names_its_own_provider_rather_than_the_primary_one():
+    """Regression, found by actually running a local setup.
+
+    With the primary pointed at a self-hosted `openai/qwen3:4b`, a bare
+    `gemini-2.5-flash` resolved to the *local* endpoint -- because the bare-id
+    lookup asked which provider is primary rather than which provider the id
+    names. The answer stage would have shipped a Gemini model to Ollama.
+    """
+    s = settings_with(
+        json.dumps({"openai": "http://localhost:11434/v1", "gemini": "https://gemini.example/v1"}),
+        fast_model="openai/qwen3:4b",
+        structured_model="openai/qwen3:4b",
+    )
+    assert s.base_url_for("openai/qwen3:4b") == "http://localhost:11434/v1"
+    assert s.base_url_for("gemini-2.5-flash") == "https://gemini.example/v1"
+
+
+def test_a_bare_id_with_no_recognisable_provider_still_uses_the_primary():
+    """The fallback for an id that says nothing -- e.g. `ling-3.0-flash:free`."""
+    s = settings_with(
+        json.dumps({"openai": "http://localhost:11434/v1"}),
+        fast_model="openai/qwen3:4b",
+    )
+    assert s.provider_prefix_for("ling-3.0-flash-sante:free") == "openai"
+
+
+def test_the_bare_id_table_agrees_with_how_litellm_routes():
+    """Two independent prefix tables drifting apart would be a silent misroute."""
+    for model, expected in (
+        ("gemini-2.5-flash", "gemini"),
+        ("gpt-4o-mini", "openai"),
+        ("o3-mini", "openai"),
+        ("text-embedding-3-small", "openai"),
+        ("claude-sonnet-4", "anthropic"),
+    ):
+        assert route_model(model).startswith(f"{expected}/"), model

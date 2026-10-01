@@ -1,11 +1,40 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from rla.config import Settings
 from rla.models import Concept, EdgeType, Paper, Relation, RelationType
 from rla.store.cache import Cache
 from rla.store.graph_store import build_graph
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_settings_from_the_developer_machine():
+    """Tests must assert this project's defaults, not the local `.env`.
+
+    Many tests construct `Settings(...)` naming only the fields they care about
+    and let pydantic-settings fill the rest from `.env`. That couples the suite to
+    whoever is running it: pointing a model role at a self-hosted model changed
+    `llm_provider`, `strong_model` and `fallback_models` underneath tests that
+    assert routing, provider selection and price coverage, and they failed for
+    reasons that had nothing to do with the code under test.
+
+    Both sources are isolated: the `.env` *file* and any `RLA_*` variables exported
+    into the shell. `GEMINI_API_KEY` and `OPENAI_API_KEY` are left alone -- tests
+    pass their own anyway, and they have no prefix to collide with.
+    """
+    original = Settings.model_config.get("env_file")
+    exported = {k: v for k, v in os.environ.items() if k.startswith("RLA_")}
+    Settings.model_config["env_file"] = None
+    for key in exported:
+        os.environ.pop(key, None)
+    try:
+        yield
+    finally:
+        Settings.model_config["env_file"] = original
+        os.environ.update(exported)
 
 
 @pytest.fixture

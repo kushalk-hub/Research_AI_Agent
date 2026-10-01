@@ -257,7 +257,16 @@ async def call_with_retry(
                 raise LLMError(f"{stage}: {exc}") from exc
             if is_daily_quota(exc):
                 summary = quota_summary(exc)
-                raise LLMError(
+                # Raised as a *typed* error, not a bare LLMError. The category has
+                # to survive this boundary: `ProviderQuotaExhausted` is what the
+                # router recognises when deciding whether `RLA_FALLBACK_ON_QUOTA`
+                # may fail over, and a text-only LLMError normalises to UNKNOWN --
+                # which is neither retried nor fallen back from. Losing it here made
+                # the documented escape hatch unreachable for the exact failure it
+                # was written for.
+                from rla.llm.errors import ProviderQuotaExhausted
+
+                raise ProviderQuotaExhausted(
                     f"{stage}: daily free-tier quota exhausted"
                     + (f" ({summary})" if summary else "")
                     + ". This limit is per day per model and does not reset by "

@@ -228,3 +228,27 @@ def test_get_spender_rebuilds_when_the_budget_changes():
     second = get_spender(9)
     assert second is not first
     assert second.budget == 9
+
+
+# -- the category must survive the retry layer --------------------------------
+
+
+async def test_the_daily_quota_keeps_its_category_across_the_retry_layer():
+    """A spent daily cap must still *look* like one on the far side.
+
+    `call_with_retry` recognises the cap, then re-raises its own text-only
+    message rather than the provider's exception. A bare `LLMError` normalises to
+    UNKNOWN, and UNKNOWN is neither retried nor fallen back from -- which makes
+    `RLA_FALLBACK_ON_QUOTA=1` unreachable for the exact failure it exists for.
+    """
+    from rla.llm.error_map import normalize
+    from rla.llm.errors import ErrorCategory, ProviderError
+
+    def _boom():
+        raise RuntimeError(DAILY_429)
+
+    with pytest.raises(ProviderError) as caught:
+        await call_with_retry(_boom, stage="extraction", max_retries=3)
+
+    assert normalize(caught.value).category is ErrorCategory.QUOTA_EXHAUSTED
+    assert not normalize(caught.value).retryable

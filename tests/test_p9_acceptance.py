@@ -444,10 +444,16 @@ async def test_a3_streaming_usage_is_metered_from_the_final_chunk(tmp_path):
 
 
 def test_a7_every_default_model_is_priced():
-    """A7: a configured model with no rate would silently understate spend."""
+    """A7: a shipped default with no rate would silently understate spend.
+
+    Deliberately isolated from `.env`. The subject is the project's *defaults*, so
+    a developer pointing a role at a self-hosted model -- which is correctly
+    unpriced, because it costs nothing -- must not turn this into a failure about
+    their own machine.
+    """
     from rla.store.cache import price_for
 
-    settings = Settings()
+    settings = Settings(_env_file=None)
     for model in (
         settings.fast_model,
         settings.strong_model,

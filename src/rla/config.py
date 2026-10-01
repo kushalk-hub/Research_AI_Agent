@@ -58,6 +58,20 @@ class Settings(BaseSettings):
     #: spends a second model's budget on a first model's ceiling. Off unless the
     #: operator explicitly wants that trade. See ADR-004.
     fallback_on_quota: bool = False
+    #: Model ids the operator declares to support schema-constrained output even
+    #: when LiteLLM's static table says otherwise.
+    #:
+    #: LiteLLM reports `supports_response_schema() == False` for any model it has
+    #: no entry for -- including a self-hosted llama.cpp/Ollama server that
+    #: honours `response_format` perfectly well. Left unaddressed, the capability
+    #: gate (ADR-004) refuses such a model, and because scoring, extraction and
+    #: resolution are *all* structured stages, it becomes unusable for exactly the
+    #: bulk work a local model is wanted for.
+    #:
+    #: Substring-matched against both the bare and the `provider/`-prefixed id, so
+    #: one entry covers both spellings. Empty preserves the gate unchanged: this is
+    #: an explicit operator assertion, never a silent assumption.
+    structured_output_models: str = ""
     #: Bound a single provider attempt. Previously no provider call had any
     #: bound: `request_timeout_seconds` only ever applied to source HTTP.
     llm_timeout_seconds: float = Field(default=120.0, gt=0.0)
@@ -177,23 +191,66 @@ class Settings(BaseSettings):
     # terminates field collection and every later annotated attribute becomes an
     # ordinary class variable instead of a setting.
 
+    def declared_structured_models(self) -> list[str]:
+        """Model ids the operator has asserted honour schema-constrained output."""
+        raw = [m.strip() for m in (self.structured_output_models or "").split(",") if m.strip()]
+        return list(dict.fromkeys(raw))
+
+    def declares_structured_output(self, model: str) -> bool:
+        """Whether `model` is on that list.
+
+        Substring-matched against the id as written and as routed, because a bare
+        `qwen3:4b` and `openai/qwen3:4b` name the same model and this project writes
+        both. Substring rather than equality so one entry can cover a family
+        (`qwen3`) without enumerating every quantisation.
+        """
+        declared = self.declared_structured_models()
+        if not declared:
+            return False
+        candidates = {model}
+        if "/" in model:
+            candidates.add(model.split("/", 1)[1])
+        return any(entry in candidate for entry in declared for candidate in candidates)
+
     def base_url_for(self, model: str) -> str | None:
         """Resolve the base URL override for a model's provider, if any.
 
-        The provider is taken from the `provider/model` prefix that LiteLLM routes
-        on. A model with no prefix is assumed to be the primary provider, since
-        that is how the direct-backend ids are written. Returns None when no
-        override is configured, which means "use the provider default" -- an
-        explicit distinction from an override pointing at an empty string.
+        Returns None when no override is configured, which means "use the provider
+        default" -- an explicit distinction from an override pointing at an empty
+        string.
         """
         override = self.parsed_base_urls()
         if not override:
             return None
+        return override.get(self.provider_prefix_for(model))
+
+    def provider_prefix_for(self, model: str) -> str:
+        """Which provider key in the base URL map a model belongs to.
+
+        An explicit `provider/model` prefix is authoritative. A *bare* id is asked
+        what provider it names -- `gemini-2.5-flash` is a Gemini model whoever
+        happens to be primary -- and only an id that identifies no provider falls
+        back to the configured primary.
+
+        Getting this wrong is silent and severe: pointing the primary at a
+        self-hosted `openai/qwen3:4b` once made a bare `gemini-2.5-flash` resolve
+        to the local endpoint, so the answer stage would have shipped a Gemini
+        model to Ollama. The table matches `llm.litellm_backend.route_model`, and
+        `test_p10_base_urls.py` asserts the two agree.
+        """
         if "/" in model:
-            prefix = model.split("/", 1)[0]
-        else:
-            prefix = self.primary_provider_prefix
-        return override.get(prefix)
+            return model.split("/", 1)[0]
+        for prefix, provider in (
+            ("gemini", "gemini"),
+            ("gpt", "openai"),
+            ("o1", "openai"),
+            ("o3", "openai"),
+            ("text-embedding", "openai"),
+            ("claude", "anthropic"),
+        ):
+            if model.startswith(prefix):
+                return provider
+        return self.primary_provider_prefix
 
     @property
     def primary_provider_prefix(self) -> str:

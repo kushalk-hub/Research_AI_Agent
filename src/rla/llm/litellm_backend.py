@@ -101,9 +101,18 @@ class LiteLLMBackend:
         An unanswerable question is answered "no". Assuming a capability for an
         unknown model is exactly how structured output degrades silently, so the
         safe default is refusal and the router surfaces a clear reason.
+
+        One exception, and it is an *explicit operator assertion* rather than an
+        assumption: `RLA_STRUCTURED_OUTPUT_MODELS`. LiteLLM has no static entry for
+        a self-hosted server, so without this the gate refuses a local model that
+        does honour `response_format` -- and since every high-volume stage is a
+        structured stage, that makes the model unusable for the work it was chosen
+        for. Leaving the setting empty keeps the refusal intact.
         """
         if capability != _STRUCTURED:
             return False
+        if self.settings.declares_structured_output(model):
+            return True
         routed = route_model(model)
         if routed in self._capability_cache:
             return self._capability_cache[routed]

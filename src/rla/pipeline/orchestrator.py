@@ -278,13 +278,19 @@ class Pipeline:
 
         store = ExtractionStore(self.settings.extractions_path)
         assert result.corpus is not None  # guarded by the caller
+        # No model is pinned here. The router resolves the stage's configured role,
+        # and an explicit argument always beats it -- so passing `strong_model`
+        # silently overrode `RLA_STRUCTURED_MODEL` for the single largest consumer
+        # of requests in the whole pipeline. Resolution follows the same rule.
+        # The resolved id is still passed through for the cost report, where a
+        # wrong or empty model would price every call as "unknown".
         async for evt in extract_papers(
             result.corpus.papers,
             self.llm,
             store,
             self.settings.max_concurrency,
             tracker=self.tracker,
-            model=self.settings.strong_model,
+            model=self.settings.model_for_structured,
         ):
             if evt.kind in {"ok", "warn"} and "extracted" in evt.payload:
                 result.extraction = {k: v for k, v in evt.payload.items() if k != "cost"}
@@ -316,7 +322,7 @@ class Pipeline:
             embedder=embedder,
             concurrency=self.settings.max_concurrency,
             tracker=self.tracker,
-            model=self.settings.strong_model,
+            model=self.settings.model_for_structured,
             paper_years=years,
         ):
             if "concept_nodes" in evt.payload:
