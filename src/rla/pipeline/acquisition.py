@@ -48,6 +48,39 @@ PER_QUERY_LIMIT: dict[str, int] = {
 SNOWBALL_SEEDS = 6
 SNOWBALL_PER_DIRECTION = 12
 
+#: How many candidates the relevance-scoring stage may look at, per paper of
+#: corpus cap.
+#:
+#: Scoring costs one request per `scoring.BATCH_SIZE` papers, so if it sees the
+#: whole candidate pool its cost scales with however many papers the sources
+#: happened to return rather than with the corpus being kept. A 291-paper pool
+#: trimmed to 30 spent 17 of a 20-request daily allowance on 261 papers that were
+#: then discarded -- and left nothing for extraction, the stage that actually
+#: builds the graph.
+#:
+#: Three gives the scorer room to demote two thirds of the window before the cap
+#: bites, while keeping the request count proportional to the corpus.
+CANDIDATE_MULTIPLE = 3
+
+
+def candidate_window(papers: list[Paper], cap: int) -> list[Paper]:
+    """The papers worth spending a scoring request on.
+
+    A cheap, model-free pre-selection using the same signals `_trim` falls back
+    on when no score exists: metadata completeness first, then citations. A
+    snowballed stub with no abstract cannot be extracted from at all, so it should
+    not displace a complete paper just by being more cited.
+
+    Papers outside the window keep `relevance_score = None`, which `_trim` reads as
+    the default and which sorts below every scored paper -- so the cap is filled
+    from the window.
+    """
+    ranked = sorted(
+        papers,
+        key=lambda p: (not (p.abstract and p.year), -p.citation_count, p.id),
+    )
+    return ranked[: max(cap, 1) * CANDIDATE_MULTIPLE]
+
 SOURCE_CLASSES: tuple[type[HttpSource], ...] = (
     SemanticScholarSource,
     OpenAlexSource,
@@ -315,8 +348,18 @@ class Acquisition:
         )
 
         if self.llm is not None:
+            # Only the bounded candidate window is scored. The rest are already
+            # ranked below it on completeness and citations, so spending requests
+            # on them would buy nothing but a smaller budget for extraction.
+            window = candidate_window(dedup.papers, self.settings.target_corpus_max)
+            if len(window) < len(dedup.papers):
+                self.report.notes.append(
+                    f"relevance-scored a {len(window)}-paper candidate window rather than "
+                    f"all {len(dedup.papers)} candidates; the rest rank below it on "
+                    "completeness and citations and could not have reached the corpus"
+                )
             async for evt in score_papers(
-                dedup.papers, title, self.llm, self.settings.max_concurrency
+                window, title, self.llm, self.settings.max_concurrency
             ):
                 if evt.kind == "warn" and not evt.payload.get("scored", 0):
                     self.report.notes.append(

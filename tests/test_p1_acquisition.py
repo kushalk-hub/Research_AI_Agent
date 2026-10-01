@@ -636,7 +636,7 @@ def test_every_adapter_stamps_its_own_provenance(cache, namespace):
         "openalex": OpenAlexSource,
         "crossref": CrossrefSource,
     }[namespace](make_fetcher(cache))
-    assert source.name in Settings().enabled_sources()
+    assert source.name in Settings(_env_file=None).enabled_sources()
 
 
 # -- Failure visibility -------------------------------------------------------
@@ -1059,3 +1059,93 @@ async def test_a_non_numeric_retry_after_is_ignored(cache, monkeypatch):
         fetcher = Fetcher(cache, client, max_retries=1)
         with pytest.raises(RuntimeError, match="failed to fetch"):
             await fetcher.get_json(OA_URL, {"search": "retry-after-httPDATE"})
+
+
+# ---------------------------------------------------------------------------
+# Relevance scoring must be bounded by the cap, not by the candidate pool
+# ---------------------------------------------------------------------------
+
+
+def test_the_candidate_window_scales_with_the_cap_not_the_pool():
+    """Scoring costs one request per 10 papers, so the pool it sees must scale
+    with the corpus cap. Scoring a 291-paper pool to keep 30 spent the entire
+    daily allowance on 261 papers that were then discarded."""
+    from rla.pipeline.acquisition import CANDIDATE_MULTIPLE, candidate_window
+
+    pool = [
+        Paper(id=f"p{i}", title=f"T{i}", year=2024, abstract="text", citation_count=i)
+        for i in range(291)
+    ]
+    window = candidate_window(pool, cap=30)
+
+    assert len(window) == 30 * CANDIDATE_MULTIPLE
+
+    # The quantity that actually costs money: one request per scoring batch.
+    from math import ceil
+
+    from rla.pipeline.scoring import BATCH_SIZE
+
+    requests_before = ceil(len(pool) / BATCH_SIZE)
+    requests_now = ceil(len(window) / BATCH_SIZE)
+    assert requests_now * 3 < requests_before, (
+        f"scoring the pool costs {requests_before} requests, the window {requests_now}"
+    )
+
+
+def test_the_candidate_window_prefers_papers_extraction_can_use():
+    """Snowballed stubs have no abstract, and extraction needs text. Ranking the
+    window on the same cheap signals keeps the spend on extractable papers."""
+    from rla.pipeline.acquisition import candidate_window
+
+    pool = [
+        Paper(id="stub", title="Stub", year=2024, citation_count=900),
+        Paper(id="complete", title="Complete", year=2024, abstract="text", citation_count=0),
+    ]
+    window = candidate_window(pool, cap=1)
+    assert [p.id for p in window] == ["complete", "stub"]
+
+
+async def test_scoring_is_never_asked_to_look_at_more_than_the_window(
+    settings, cache, monkeypatch
+):
+    """The end-to-end shape of the waste: the pool handed to the scoring stage
+    must be bounded by the cap even when the sources return hundreds of papers."""
+    from rla.events import Phase, event
+    from rla.pipeline import acquisition as acq
+
+    seen: list[int] = []
+
+    async def _record(papers, title, llm, concurrency=4, model=""):
+        seen.append(len(papers))
+        for paper in papers:
+            paper.relevance_score = 4
+        yield event(Phase.SCORE, f"scored {len(papers)}", kind="ok")
+
+    monkeypatch.setattr(acq, "score_papers", _record)
+
+    settings = settings.model_copy(update={"target_corpus_max": 30})
+
+    async def _inject(self, queries, dedup):
+        for i in range(291):
+            dedup.add(
+                Paper(id=f"p{i}", title=f"T{i}", year=2024, abstract="text", citation_count=i)
+            )
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(acq.Acquisition, "_fan_out", _inject)
+
+    async def _no_queries(self, title):
+        self.report.queries = [title]
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(acq.Acquisition, "_queries", _no_queries)
+
+    acquisition = acq.Acquisition(settings, cache, object())
+    async for _ in acquisition.run("agents"):
+        pass
+
+    assert seen, "scoring never ran"
+    assert seen[0] == 30 * acq.CANDIDATE_MULTIPLE
+    assert len(acquisition.corpus.papers) == 30
