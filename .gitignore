@@ -1,4 +1,8 @@
-    .env
+.env
+# Backups of the real .env also contain credentials. `.env` alone does not match
+# `.env.bak-20261002-011629`, so a plain `git add -A` would publish the keys.
+# `.env.example` stays tracked: the pattern is narrow on purpose.
+.env.bak*
 data/cache.db
 data/cache.db-journal
 data/raw/
