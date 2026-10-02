@@ -99,7 +99,7 @@ EXTRACTIONS = [
 
 @pytest.fixture
 def graph():
-    g, _ = build_graph(PAPERS, CONCEPTS, RELATIONS)
+    g, _, _ = build_graph(PAPERS, CONCEPTS, RELATIONS)
     return g
 
 
@@ -219,7 +219,7 @@ def test_a_corpus_of_only_recent_papers_still_finds_gaps():
         Concept(id="c:old", name="abandoned direction", first_seen_year=2022),
         Concept(id="c:new", name="current direction", first_seen_year=2025),
     ]
-    g, _ = build_graph(
+    g, _, _ = build_graph(
         papers,
         concepts,
         [

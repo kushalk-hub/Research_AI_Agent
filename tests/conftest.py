@@ -81,5 +81,10 @@ def graph_and_papers(papers):
         ),
         Relation(source_id="p1", target_id="c:gat", edge_type=EdgeType.INTRODUCES),
     ]
-    graph, report = build_graph(papers, concepts, relations)
-    return graph, papers, report
+    graph, counts, violations = build_graph(papers, concepts, relations)
+    return graph, papers, {
+        "citations": counts.citations,
+        "derived_edges": counts.added,
+        "temporal_violations_dropped": len(violations),
+        "temporal_violations": violations,
+    }

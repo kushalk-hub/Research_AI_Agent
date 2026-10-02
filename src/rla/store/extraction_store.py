@@ -14,6 +14,8 @@ Two properties matter here:
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -62,6 +64,26 @@ class ExtractionStore:
 
     def __len__(self) -> int:
         return len(self._by_hash)
+
+    def rewrite(self, extractions: Iterable[Extraction]) -> int:
+        """Replace the file's contents, atomically. Returns the row count.
+
+        `add` appends, so pruning has to rewrite. A plain `write_text` is not
+        enough: an interrupted prune would leave a half-deleted store, which is
+        worse than not pruning at all because it is silent. Write beside the
+        target and `os.replace`, which is atomic on Windows and POSIX.
+        """
+        kept = list(extractions)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as handle:
+            for extraction in kept:
+                handle.write(extraction.model_dump_json() + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, self.path)
+        self._by_hash = {e.paper_hash: e for e in kept}
+        return len(kept)
 
 
 @dataclass(slots=True)
@@ -139,3 +161,16 @@ def reconcile(corpus: Corpus, store: ExtractionStore) -> Reconciliation:
     )
     report.matched = sum(1 for p in papers if current_hash[p.id] in stored_keys)
     return report
+
+
+def reconcile_extractions(corpus: Corpus, extractions: Iterable[Extraction]) -> Reconciliation:
+    """`reconcile` for callers that hold a list rather than a store."""
+
+    class _View:
+        def __init__(self, items: list[Extraction]) -> None:
+            self._items = list(items)
+
+        def all(self) -> list[Extraction]:
+            return self._items
+
+    return reconcile(corpus, _View(extractions))  # type: ignore[arg-type]

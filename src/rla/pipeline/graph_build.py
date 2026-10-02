@@ -211,7 +211,16 @@ def build_research_graph(
 ) -> tuple[Graph, dict[str, Any]]:
     """Assemble the full graph and report everything the schema could not hold."""
     relations, unresolved = collect_relations(extractions, concepts)
-    graph, report = build_graph(papers, concepts, relations)
+    graph, counts, violations = build_graph(papers, concepts, relations)
+
+    report: dict[str, Any] = {
+        "citations": counts.citations,
+        "derived_edges": counts.added,
+        "skipped_missing_endpoint": counts.skipped_missing_endpoint,
+        "duplicate_relations": counts.duplicate,
+        "temporal_violations_dropped": len(violations),
+        "temporal_violations": violations,
+    }
 
     extracted_ids = {e.paper_id for e in extractions}
 
@@ -258,6 +267,33 @@ async def build_graph_stage(
     graphml_path: Path,
 ) -> AsyncIterator[Event]:
     """Build, persist, and describe the graph. The last event carries the report."""
+    from rla.store.extraction_store import reconcile_extractions
+
+    integrity = reconcile_extractions(corpus, extractions)
+    if not integrity.intact:
+        yield event(
+            Phase.GRAPH,
+            f"refusing to build a graph: {len(integrity.stale)} stored extraction(s) belong "
+            f"to a different corpus and {len(integrity.superseded)} describe superseded "
+            f"paper content. A graph built now would be wrong in a way no reader could "
+            f"detect. {integrity.advice}",
+            kind="error",
+            stale_extractions=len(integrity.stale),
+            superseded_extractions=len(integrity.superseded),
+            blocked=True,
+        )
+        return
+
+    if integrity.missing:
+        yield event(
+            Phase.GRAPH,
+            f"{len(integrity.missing)} corpus paper(s) have no extraction; building a "
+            "partial graph",
+            kind="warn",
+            missing_extractions=len(integrity.missing),
+            blocked=False,
+        )
+
     if not concepts:
         report = _no_extraction_report(
             "no resolved concepts; run resolution first", len(corpus.papers)
@@ -281,6 +317,15 @@ async def build_graph_stage(
             f"internal error: {len(remaining)} temporal violations survived cleaning",
             kind="error",
             violations=[{"source": s, "target": t} for s, t, _ in remaining],
+        )
+
+    if report["skipped_missing_endpoint"]:
+        yield event(
+            Phase.GRAPH,
+            f"{report['skipped_missing_endpoint']} relation(s) were dropped because an "
+            "endpoint is not in the graph",
+            kind="warn",
+            skipped_missing_endpoint=report["skipped_missing_endpoint"],
         )
 
     save_graph(graph, json_path, graphml_path)

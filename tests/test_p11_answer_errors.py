@@ -118,7 +118,7 @@ async def test_a_failed_answer_reports_the_category_not_a_raw_blob():
 
     paper = Paper(id="p1", title="Graph Attention Networks", year=2018)
     relation = Relation(source_id="p1", target_id="c:gat", edge_type=EdgeType.INTRODUCES)
-    graph, _ = build_graph(
+    graph, _, _ = build_graph(
         [paper],
         [Concept(id="c:gat", name="graph attention networks", first_seen_year=2018)],
         [relation],
@@ -156,7 +156,7 @@ async def test_a_quota_failure_still_yields_the_traversal_first():
 
     paper = Paper(id="p1", title="Graph Attention Networks", year=2018)
     relation = Relation(source_id="p1", target_id="c:gat", edge_type=EdgeType.INTRODUCES)
-    graph, _ = build_graph(
+    graph, _, _ = build_graph(
         [paper],
         [Concept(id="c:gat", name="graph attention networks", first_seen_year=2018)],
         [relation],

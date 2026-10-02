@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -77,13 +78,36 @@ def add_citation_edges(graph: Graph, papers: Iterable[Paper]) -> int:
     return added
 
 
-def add_relations(graph: Graph, relations: Iterable[Relation]) -> int:
-    """Add LLM-derived edges, skipping any endpoint that is not in the graph."""
-    added = 0
+@dataclass(slots=True)
+class GraphBuildCounts:
+    """What was added, and what was refused.
+
+    A refused relation is a *result*, not an oversight. Counting it is what turns
+    "the graph is missing its paper-to-concept layer" from an invisible state into
+    a number a reader can act on.
+    """
+
+    citations: int = 0
+    added: int = 0
+    skipped_missing_endpoint: int = 0
+    duplicate: int = 0
+
+
+def add_relations(
+    graph: Graph, relations: Iterable[Relation], counts: GraphBuildCounts
+) -> int:
+    """Add LLM-derived edges.
+
+    A relation with an endpoint that is not in the graph is counted and skipped.
+    It is never materialised as a node either: inventing one would assert that a
+    paper we do not have exists.
+    """
     for relation in relations:
         if not (graph.has_node(relation.source_id) and graph.has_node(relation.target_id)):
+            counts.skipped_missing_endpoint += 1
             continue
         if graph.has_edge(relation.source_id, relation.target_id, key=str(relation.edge_type)):
+            counts.duplicate += 1
             continue
         graph.add_edge(
             relation.source_id,
@@ -95,8 +119,8 @@ def add_relations(graph: Graph, relations: Iterable[Relation]) -> int:
             confidence=relation.confidence,
             ground_truth=False,
         )
-        added += 1
-    return added
+        counts.added += 1
+    return counts.added
 
 
 def enforce_temporal_constraints(graph: Graph) -> list[tuple[str, str, EdgeType]]:
@@ -134,20 +158,16 @@ def build_graph(
     papers: Iterable[Paper],
     concepts: Iterable[Concept],
     relations: Iterable[Relation],
-) -> tuple[Graph, dict[str, Any]]:
+) -> tuple[Graph, GraphBuildCounts, list[dict[str, str]]]:
     papers = list(papers)
     graph = empty_graph()
     add_papers(graph, papers)
     add_concepts(graph, concepts)
-    citations = add_citation_edges(graph, papers)
-    derived = add_relations(graph, relations)
+    counts = GraphBuildCounts(citations=add_citation_edges(graph, papers))
+    add_relations(graph, relations, counts)
     dropped = enforce_temporal_constraints(graph)
-    return graph, {
-        "citations": citations,
-        "derived_edges": derived,
-        "temporal_violations_dropped": len(dropped),
-        "temporal_violations": [{"source": s, "target": t, "edge": str(e)} for s, t, e in dropped],
-    }
+    violations = [{"source": s, "target": t, "edge": str(e)} for s, t, e in dropped]
+    return graph, counts, violations
 
 
 def stats(graph: Graph) -> dict[str, int]:

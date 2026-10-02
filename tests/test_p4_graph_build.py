@@ -60,6 +60,17 @@ def extraction(
     )
 
 
+def extraction_for(p: Paper, **kw) -> Extraction:
+    """An extraction whose hash matches the paper, as the real pipeline writes it.
+
+    The graph stage gates on store-vs-corpus integrity, so stage tests must use
+    consistent hashes; the fake `hash-{pid}` would read as superseded content.
+    """
+    e = extraction(p.id, **kw)
+    e.paper_hash = p.ensure_hash()
+    return e
+
+
 # -- Name resolution ------------------------------------------------------------
 
 
@@ -407,10 +418,13 @@ def _corpus() -> Corpus:
 
 
 async def test_the_stage_persists_both_files_and_reports(tmp_path):
+    p1 = paper("p1", 2016)
+    p2 = paper("p2", 2021, references=["p1"])
+    corpus = Corpus(title="graph agents", papers=[p1, p2])
     extractions = [
-        extraction("p1", concepts=[ConceptMention(name="attention", role="introduces")]),
-        extraction(
-            "p2",
+        extraction_for(p1, concepts=[ConceptMention(name="attention", role="introduces")]),
+        extraction_for(
+            p2,
             concepts=[ConceptMention(name="graph attention networks", role="introduces")],
             builds_on=["attention"],
         ),
@@ -420,7 +434,7 @@ async def test_the_stage_persists_both_files_and_reports(tmp_path):
     events = [
         evt
         async for evt in build_graph_stage(
-            _corpus(), CONCEPTS, extractions, json_path, graphml_path
+            corpus, CONCEPTS, extractions, json_path, graphml_path
         )
     ]
 
@@ -452,14 +466,17 @@ async def test_a_surviving_temporal_violation_is_reported_as_an_error(tmp_path, 
         return [(GAT.id, ATTENTION.id, EdgeType.EXTENDS)]
 
     monkeypatch.setattr(graph_build, "enforce_temporal_constraints", leaky_clean)
+    p1 = paper("p1", 2016)
+    p2 = paper("p2", 2021, references=["p1"])
+    corpus = Corpus(title="graph agents", papers=[p1, p2])
     extractions = [
-        extraction("p1", concepts=[ConceptMention(name="attention", role="introduces")]),
-        extraction("p2", concepts=[ConceptMention(name="GAT", role="uses")]),
+        extraction_for(p1, concepts=[ConceptMention(name="attention", role="introduces")]),
+        extraction_for(p2, concepts=[ConceptMention(name="GAT", role="uses")]),
     ]
     events = [
         evt
         async for evt in build_graph_stage(
-            _corpus(), CONCEPTS, extractions, tmp_path / "g.json", tmp_path / "g.graphml"
+            corpus, CONCEPTS, extractions, tmp_path / "g.json", tmp_path / "g.graphml"
         )
     ]
     assert any(evt.kind == "error" for evt in events)
@@ -498,9 +515,10 @@ async def test_graph_runs_after_resolve_and_lands_in_the_result(settings, cache,
     # Keep it offline: with a key set, resolution would try to embed for real.
     settings.gemini_api_key = ""
     settings.extractions_path.parent.mkdir(parents=True, exist_ok=True)
+    seed_paper = paper("p1", 2016, sources=["fake"])
     settings.extractions_path.write_text(
-        extraction(
-            "p1", concepts=[ConceptMention(name="attention", role="introduces")]
+        extraction_for(
+            seed_paper, concepts=[ConceptMention(name="attention", role="introduces")]
         ).model_dump_json()
         + "\n",
         "utf-8",
@@ -523,3 +541,79 @@ async def test_graph_runs_after_resolve_and_lands_in_the_result(settings, cache,
     assert result.graph.has_edge("p2", "p1", key="CITES")
     assert settings.graph_json.exists()
     assert settings.graph_graphml.exists()
+
+
+async def _collect(agen):
+    return [e async for e in agen]
+
+
+async def test_the_graph_stage_refuses_to_write_from_a_store_of_another_corpus(tmp_path):
+    """The integrity policy, not a warning.
+
+    `stale > 0` means the store describes a different corpus, so a graph built
+    from it is wrong in a way no reader could detect. The stage must error and
+    must NOT write graph.json.
+    """
+    from rla.config import get_settings
+    from rla.models import Concept, Corpus, Extraction, Paper
+    from rla.pipeline.graph_build import build_graph_stage
+    from rla.store.extraction_store import ExtractionStore
+
+    settings = get_settings().model_copy(
+        update={"data_dir": tmp_path, "graph_dir": tmp_path / "graph"}
+    )
+    settings.ensure_dirs()
+    store = ExtractionStore(tmp_path / "e.jsonl")
+    store.add(
+        Extraction(paper_id="from-an-old-corpus", paper_hash="deadbeef", summary="s")
+    )
+
+    corpus = Corpus(
+        title="t", papers=[Paper(id="current", title="P", year=2024, abstract="x")]
+    )
+    events = await _collect(
+        build_graph_stage(
+            corpus,
+            [Concept(id="c:a", name="A", first_seen_year=2020)],
+            store.all(),
+            settings.graph_json,
+            settings.graph_graphml,
+        )
+    )
+
+    assert any(e.kind == "error" for e in events)
+    assert not settings.graph_json.exists(), "a graph must not be written from a stale store"
+
+
+async def test_the_graph_stage_still_writes_when_only_coverage_is_incomplete(tmp_path):
+    """Missing extractions are an ordinary incomplete run: warn, and build."""
+    from rla.config import get_settings
+    from rla.models import Concept, Corpus, Extraction, Paper
+    from rla.pipeline.graph_build import build_graph_stage
+    from rla.store.extraction_store import ExtractionStore
+
+    settings = get_settings().model_copy(
+        update={"data_dir": tmp_path, "graph_dir": tmp_path / "graph"}
+    )
+    settings.ensure_dirs()
+    paper = Paper(id="current", title="P", year=2024, abstract="x")
+    store = ExtractionStore(tmp_path / "e.jsonl")
+    store.add(Extraction(paper_id=paper.id, paper_hash=paper.ensure_hash(), summary="s"))
+
+    corpus = Corpus(
+        title="t",
+        papers=[paper, Paper(id="other", title="Q", year=2023, abstract="y")],
+    )
+    events = await _collect(
+        build_graph_stage(
+            corpus,
+            [Concept(id="c:a", name="A", first_seen_year=2020)],
+            store.all(),
+            settings.graph_json,
+            settings.graph_graphml,
+        )
+    )
+
+    assert settings.graph_json.exists()
+    assert not any(e.kind == "error" for e in events)
+    assert any(e.kind == "warn" for e in events), "an incomplete corpus must say so"
