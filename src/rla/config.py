@@ -13,7 +13,47 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from rla.errors import ModelResolutionError
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+#: Providers served by a native backend in this project.
+NATIVE_PROVIDERS = frozenset({"gemini", "ollama"})
+
+#: Provider prefixes LiteLLM routes on. Everything here is served by
+#: `LiteLLMBackend`. Curated rather than read from litellm at import time so
+#: config.py keeps no dependency on the optional extra, and so an unrecognised
+#: prefix is caught here with a useful message instead of by LiteLLM's
+#: `LLM Provider NOT provided`.
+LITELLM_PROVIDERS = frozenset(
+    {
+        "openai",
+        "openrouter",
+        "groq",
+        "anthropic",
+        "azure",
+        "bedrock",
+        "cohere",
+        "mistral",
+        "deepseek",
+        "xai",
+    }
+)
+
+#: Every prefix a model id may carry. Adding a provider is one line here.
+KNOWN_PROVIDERS = NATIVE_PROVIDERS | LITELLM_PROVIDERS
+
+#: Bare model-id families that unambiguously name their provider. A bare id
+#: matching none of these is REFUSED rather than guessed at, because guessing is
+#: how a Gemini model once ended up on a local Ollama endpoint.
+PROVIDER_NATIVE_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("gemini", "gemini"),
+    ("gpt", "openai"),
+    ("o1", "openai"),
+    ("o3", "openai"),
+    ("text-embedding", "openai"),
+    ("claude", "anthropic"),
+)
 
 
 class Settings(BaseSettings):
@@ -190,6 +230,41 @@ class Settings(BaseSettings):
     # scanning class-level annotations, so a method interleaved among them silently
     # terminates field collection and every later annotated attribute becomes an
     # ordinary class variable instead of a setting.
+
+    def canonical_model(self, model: str) -> str:
+        """Resolve a model id to its one canonical `provider/model` identity.
+
+        Every consumer -- provider dispatch, LLM cache key, embedding cache key,
+        merge-threshold lookup, doctor and TUI display -- reads the result of this
+        and never re-interprets the original string. Two subsystems therefore
+        cannot disagree about which provider a model belongs to.
+
+        A bare id is accepted only when it unambiguously names a provider.
+        Anything else raises rather than falling back to a configured default:
+        a silent guess is precisely the defect class this exists to remove.
+        """
+        candidate = (model or "").strip()
+        if not candidate:
+            raise ModelResolutionError(
+                "Empty model id. Expected a model name such as "
+                "'gemini/gemini-2.5-flash' or 'ollama/qwen3:4b'."
+            )
+        if "/" in candidate:
+            prefix, bare = candidate.split("/", 1)
+            if prefix in KNOWN_PROVIDERS:
+                return f"{prefix}/{bare}"
+            raise ModelResolutionError(
+                f"Unknown provider prefix {prefix!r} in model id {candidate!r}. "
+                f"Known providers: {', '.join(sorted(KNOWN_PROVIDERS))}."
+            )
+        for prefix, provider in PROVIDER_NATIVE_PREFIXES:
+            if candidate.startswith(prefix):
+                return f"{provider}/{candidate}"
+        raise ModelResolutionError(
+            f"Ambiguous model id {candidate!r}: it names no known provider. "
+            "Specify an explicit provider prefix, for example "
+            f"'ollama/{candidate}' (or another supported provider/model id)."
+        )
 
     def declared_structured_models(self) -> list[str]:
         """Model ids the operator has asserted honour schema-constrained output."""

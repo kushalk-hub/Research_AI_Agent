@@ -18,3 +18,13 @@ class SourceFormatError(RlaError):
     or an HTML error page is a "this source is unusable right now" signal, not
     "this topic has no papers". Silently returning zero results would hide it.
     """
+
+
+class ModelResolutionError(RuntimeError):
+    """A model id could not be resolved to exactly one provider.
+
+    Raised during configuration resolution, before any request is made. It is a
+    configuration fault rather than a provider fault, so it is deliberately not a
+    `ProviderError`: the router must not retry it or fail over on it, because no
+    other model will fix a malformed id.
+    """
