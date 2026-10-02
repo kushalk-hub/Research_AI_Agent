@@ -6,6 +6,8 @@ Module name follows the milestone it gates, per the repo's test-naming conventio
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from pydantic import BaseModel, Field
 
@@ -692,3 +694,88 @@ async def test_an_empty_opt_in_declares_nothing(tmp_path):
 
     assert settings.declared_structured_models() == []
     assert settings.declares_structured_output("openai/qwen3:4b") is False
+
+
+# ---------------------------------------------------------------------------
+# P12: the session-override rung, and fallback observation
+# ---------------------------------------------------------------------------
+
+
+def test_a_session_override_beats_an_explicit_model_argument(tmp_path):
+    """The TUI user must be able to say "use Ollama for extraction in this run"
+    even where a stage supplies a model explicitly to label its cost report."""
+    backend = FakeBackend()
+    router = make_router(backend, tmp_path)
+    router.set_override("structured", "openai/gpt-4o-mini")
+
+    asyncio.run(router.generate_text("x", stage="extraction", model="gemini-2.5-flash"))
+
+    assert backend.calls[-1] == ("extraction", "openai/gpt-4o-mini")
+
+
+def test_an_explicit_argument_still_beats_the_stage_role(tmp_path):
+    """Retargeted, not deleted: the old contract survives beneath the new rung."""
+    backend = FakeBackend()
+    router = make_router(backend, tmp_path)
+
+    asyncio.run(router.generate_text("x", stage="extraction", model="explicit-model"))
+
+    assert backend.calls[-1] == ("extraction", "explicit-model")
+
+
+def test_an_empty_override_does_not_win(tmp_path):
+    """`is not None`, never truthiness: an empty string must not beat a real model."""
+    backend = FakeBackend()
+    router = make_router(backend, tmp_path)
+    router.set_override("structured", "")
+
+    asyncio.run(router.generate_text("x", stage="extraction"))
+
+    assert backend.calls[-1] == ("extraction", settings_structured(router))
+
+
+def test_clearing_an_override_restores_the_configured_role(tmp_path):
+    backend = FakeBackend()
+    router = make_router(backend, tmp_path)
+    router.set_override("structured", "openai/gpt-4o-mini")
+    router.set_override("structured", None)
+
+    asyncio.run(router.generate_text("x", stage="extraction"))
+
+    assert backend.calls[-1] == ("extraction", settings_structured(router))
+
+
+def test_an_override_does_not_leak_to_another_role(tmp_path):
+    backend = FakeBackend()
+    router = make_router(backend, tmp_path)
+    router.set_override("structured", "openai/gpt-4o-mini")
+
+    asyncio.run(router.generate_text("x", stage="answer"))
+
+    assert backend.calls[-1][0] == "answer"
+
+
+def test_a_fallback_is_reported_to_the_observer(tmp_path):
+    backend = FakeBackend(fail={"gemini-2.5-flash-lite": ProviderServerError("503")})
+    router = make_router(backend, tmp_path)
+    seen: list[tuple[str, str, str, str]] = []
+    router.on_fallback = seen.append
+
+    asyncio.run(router.generate_text("x", stage="extraction"))
+
+    assert seen and seen[0][0] == "extraction"
+
+
+def test_the_observer_cannot_change_the_fallback_decision(tmp_path):
+    """It observes; it does not own. A raising observer must not become a second
+    mechanism, so the call still succeeds on the fallback."""
+    backend = FakeBackend(fail={"gemini-2.5-flash-lite": ProviderServerError("503")})
+    router = make_router(backend, tmp_path)
+
+    def _explode(_entry: tuple[str, str, str, str]) -> None:
+        raise RuntimeError("observer tried to interfere")
+
+    router.on_fallback = _explode
+
+    text = asyncio.run(router.generate_text("x", stage="extraction"))
+    assert text == "text from gemini-2.5-flash"

@@ -6,7 +6,8 @@ provider or model served the call (ADR-001).
 
 Three responsibilities, and deliberately only three:
 
-1. **Model selection** per stage, so a stage never hard-codes a model id.
+1. **Model selection** per stage, so a stage never hard-codes a model id, with a
+   transient session override above both the call site and the configured role.
 2. **Capability gating** -- a model that cannot do what the stage needs is refused, not
    silently used in a degraded mode. This is what keeps the abstraction from collapsing
    to a lowest common denominator (ADR-004).
@@ -84,6 +85,15 @@ class ProviderRouter:
         self.tracker = tracker or CostTracker()
         #: (stage, from_model, to_model, reason) for each fallback taken.
         self.fallbacks: list[tuple[str, str, str, str]] = []
+        #: Transient per-role session overrides (the TUI model selector). Keyed by
+        #: role name -- "structured" or "answer" -- not by stage, because the
+        #: selector's whole purpose is "use this model for extraction", which
+        #: covers both the extraction and resolution stages.
+        self.overrides: dict[str, str] = {}
+        #: Optional observer for fallback decisions. It is told what happened and
+        #: owns none of it: eligibility, ordering and the retry/fallback split
+        #: stay entirely inside this class and the backend's `call_with_retry`.
+        self.on_fallback: Callable[[tuple[str, str, str, str]], None] | None = None
 
     # -- properties ---------------------------------------------------------
     @property
@@ -98,11 +108,23 @@ class ProviderRouter:
     def model_for(self, stage: str, explicit: str | None = None) -> str:
         """Resolve which model serves a stage.
 
-        An explicit request always wins. Otherwise the stage's configured role wins,
-        which is what makes per-stage model choice possible without touching a
-        pipeline stage (the audit found `strong_model` was accepted by two stages
-        and then discarded, so the configured model never reached the provider).
+        Four rungs, highest first:
+
+        1. a **session override** -- a deliberate, higher-priority user control
+           from the TUI model selector, which must be able to say "use Ollama for
+           extraction in this run" even where a stage supplies a model explicitly;
+        2. an **explicit `model=` argument** -- a call-site default, which still
+           beats the configured role exactly as it did before P12;
+        3. the stage's **configured role**;
+        4. `fast_model`.
+
+        Rungs 2 and 3 are the pre-P12 contract, unchanged. Rung 1 is new, and is
+        deliberately transient: it lives on this instance and is never written
+        back to settings.
         """
+        override = self.overrides.get(self.role_for(stage))
+        if override is not None and override != "":
+            return override
         if explicit:
             return explicit
         match stage:
@@ -112,6 +134,31 @@ class ProviderRouter:
                 return self.settings.model_for_structured
             case _:
                 return self.settings.fast_model
+
+    def set_override(self, role: str, model: str | None) -> None:
+        """Set or clear a transient session override for a role.
+
+        Never written to settings or `.env`: a TUI selection is a choice for this
+        run, and persisting it would turn an experiment into permanent
+        configuration. `None` clears; an empty string is stored but does not win,
+        because the lookup tests `is not None` and then falls through.
+        """
+        if model is None:
+            self.overrides.pop(role, None)
+        else:
+            self.overrides[role] = model
+
+    def clear_overrides(self) -> None:
+        self.overrides.clear()
+
+    @staticmethod
+    def role_for(stage: str) -> str:
+        """The override key a stage reads. Unmapped stages read no override."""
+        if stage == "answer":
+            return "answer"
+        if stage in ("query_expansion", "relevance_scoring", "extraction", "resolution"):
+            return "structured"
+        return ""
 
     def _chain(self, model: str) -> list[str]:
         """Primary followed by the fallbacks available to that primary."""
@@ -201,7 +248,16 @@ class ProviderRouter:
                     if hint:
                         error.args = (f"{error.args[0]}{hint}",)
                     raise error.with_context(stage=stage) from exc
-                self.fallbacks.append((stage, candidate, candidates[index + 1], error.category))
+                entry = (stage, candidate, candidates[index + 1], error.category)
+                self.fallbacks.append(entry)
+                if self.on_fallback is not None:
+                    try:
+                        self.on_fallback(entry)
+                    except Exception:
+                        # Observability must never become a second mechanism: a
+                        # failing observer is dropped, not allowed to change the
+                        # routing decision that was already made.
+                        pass
         raise last if last else LLMError(f"stage {stage!r} produced no attempt")
 
     # -- public API ---------------------------------------------------------
