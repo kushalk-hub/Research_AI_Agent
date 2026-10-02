@@ -592,6 +592,35 @@ def eval() -> None:
     console.print(f"  JSON:   {eval_dir / 'results.json'}")
 
 
+@app.command(name="calibrate-merges")
+def calibrate_merges() -> None:
+    """Propose merge thresholds for the configured embedding model.
+
+    Reports the similarity distribution over the concepts already extracted and
+    proposes an automatic-merge boundary at a 2% false-merge budget. Installs
+    nothing: until a threshold is committed for this embedding model, automatic
+    merging stays disabled and borderline pairs go to the bounded judge.
+    """
+    from rla.eval.merge_calibration import calibrate
+    from rla.llm.factory import build_embedder
+    from rla.store.extraction_store import ExtractionStore
+
+    settings = get_settings()
+    store = ExtractionStore(settings.extractions_path)
+    store.load()
+    if not store.all():
+        console.print("[yellow]no stored extractions; run `rla run` first.[/]")
+        raise typer.Exit(code=1)
+
+    embedder = build_embedder(settings, Cache(settings.cache_db), CostTracker())
+    if embedder is None:
+        console.print("[yellow]no usable embedding provider is configured.[/]")
+        raise typer.Exit(code=1)
+
+    report = asyncio.run(calibrate(store.all(), embedder))
+    console.print(report.render())
+
+
 def _tui_available_models(settings: Settings) -> tuple[str, ...]:
     """Canonical model ids the TUI selector may offer, most relevant first.
 
