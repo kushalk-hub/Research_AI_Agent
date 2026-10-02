@@ -12,7 +12,7 @@ Companion documents:
 | [`demo_commands.md`](demo_commands.md) | command-by-command manual checks with expected output |
 | [`env_loading.md`](env_loading.md) | how `.env` is found and resolved |
 | [`llm_provider_migration_plan.md`](llm_provider_migration_plan.md) | why the routing layer exists |
-| [`adr/`](adr/) | the five decisions behind the LLM layer |
+| [`adr/`](adr/) | the seven decisions behind the LLM layer |
 
 Verified against the working tree on 2026-10-01.
 
@@ -309,15 +309,24 @@ module-scope `import litellm`.
 
 ### 3.3 Choosing the model — the precedence rules
 
-For every call, `ProviderRouter.model_for(stage, explicit)` resolves in this order:
+For every call, `ProviderRouter.model_for(stage, explicit)` (`src/rla/llm/router.py:108`)
+resolves in this order, highest first:
 
-1. **An explicit `model=` argument wins.** Always. No exceptions.
-2. **The stage's configured role** wins next:
+1. **A session override** — a transient per-role control from the TUI model selector
+   (`ProviderRouter.set_override` / `clear_overrides`), or from the CLI flags
+   `rla run|tui --structured-model` / `--answer-model`. This is a deliberate
+   higher-priority user control: it wins even where a stage supplies a model
+   explicitly, so an operator can say "use Ollama for extraction in this run"
+   without editing configuration. It lives on the router instance and is never
+   written back to settings or `.env`.
+2. **An explicit `model=` argument** — a call-site default, which still beats the
+   configured role exactly as it did before P12.
+3. **The stage's configured role:**
    - `answer` → `RLA_ANSWER_MODEL`, falling back to `RLA_STRONG_MODEL`
-   - `query_expansion`, `relevance_scoring`, `extraction`, `resolution` → `RLA_STRUCTURED_MODEL`,
-     falling back to `RLA_FAST_MODEL`
+   - `query_expansion`, `relevance_scoring`, `extraction`, `resolution` →
+     `RLA_STRUCTURED_MODEL`, falling back to `RLA_FAST_MODEL`
    - any other stage (e.g. `doctor`) → `RLA_FAST_MODEL`
-3. Nothing else. There is no heuristic, no load balancing, no cost optimisation.
+4. **Nothing else.** There is no heuristic, no load balancing, no cost optimisation.
 
 | Setting | Used for | Default | `.env` here |
 |---|---|---|---|
@@ -333,31 +342,51 @@ defaults to `""` and not to `strong_model`: the structured stages are the bulk o
 volume (a 100-paper corpus is ~100 extraction calls, which is five days of the free tier's daily
 allowance), so defaulting them to the *expensive* model would be wrong on a free key.
 
-### 3.4 An explicit model beats the configured role
+### 3.4 Canonical model ids — one identity downstream
 
-Rule 1 has a sharp edge, and it caused a real defect. `pipeline/orchestrator.py` used to pass
-`model=self.settings.strong_model` explicitly into `extract_papers(...)` and `resolve_concepts(...)`.
-Because an explicit argument wins, extraction and resolution ran on `RLA_STRONG_MODEL` and
-**silently ignored `RLA_STRUCTURED_MODEL`** — for the two stages that spend the most requests.
-Reproduced with distinct settings:
+Every consumer — provider dispatch, LLM cache key, embedding cache key,
+merge-threshold lookup, `doctor` and TUI display — reads the result of
+`Settings.canonical_model` (`src/rla/config.py:244`) and never re-interprets the
+original string, so two subsystems cannot disagree about which provider a model
+belongs to:
+
+| Input | Result |
+|---|---|
+| `ollama/qwen3:4b` | valid → Ollama |
+| `gemini/gemini-2.5-flash` | valid → Gemini |
+| `gemini-2.5-flash` | valid → canonicalized Gemini identity |
+| `qwen3:4b` | **ERROR** — ambiguous bare id |
+| `foo/bar` | **ERROR** — unknown provider prefix |
+
+A bare id is accepted only when it unambiguously names a provider (a `gemini-*`
+model, a `gpt`/`o1`/`o3` model, a `claude-*` model, …). Anything else raises
+`ModelResolutionError` (`src/rla/errors.py`) **before any network request**,
+rather than silently resolving to the configured default provider — guessing is
+how a Gemini model once ended up on a local Ollama endpoint.
+
+The two refusal cases and their exact messages:
 
 ```text
-A) router resolves by stage:
-  stage=query_expansion      model=STRUCTURED
-  stage=relevance_scoring    model=STRUCTURED
-  stage=extraction           model=STRUCTURED
-  stage=resolution           model=STRUCTURED
-B) what the orchestrator actually passed (the real pipeline path), before the fix:
-  stage=extraction           model=STRONG
-  stage=resolution           model=STRONG
+Ambiguous model id 'qwen3:4b': it names no known provider. Specify an explicit
+provider prefix, for example 'ollama/qwen3:4b' (or another supported
+provider/model id).
 ```
 
-**Fixed.** The orchestrator now passes `settings.model_for_structured`, so `RLA_STRUCTURED_MODEL`
-reaches all four structured stages and you can move extraction onto a model that still has quota by
-configuration alone. Pinned by `test_p0_orchestrator.py`.
+```text
+Unknown provider prefix 'foo' in model id 'foo/bar'. Known providers: anthropic,
+azure, bedrock, cohere, deepseek, gemini, groq, mistral, ollama, openai,
+openrouter, xai.
+```
 
-The rule itself is unchanged and is worth remembering when adding a caller: **pass no model id and let
-the router resolve it**, or the setting you are trying to change will be ignored without warning.
+The old sharp edge is worth remembering when adding a caller (§3.3 rung 2):
+`pipeline/orchestrator.py` used to pass `model=self.settings.strong_model`
+explicitly into `extract_papers(...)` and `resolve_concepts(...)`, so extraction
+and resolution ran on `RLA_STRONG_MODEL` and **silently ignored
+`RLA_STRUCTURED_MODEL`** — for the two stages that spend the most requests.
+**Fixed:** the orchestrator now passes `settings.model_for_structured`, and the
+rule is pinned by `test_p0_orchestrator.py`. **Pass no model id and let the router
+resolve it**, or the setting you are trying to change will be ignored without
+warning.
 
 ### 3.5 The capability gate
 
@@ -481,7 +510,9 @@ Two kinds of knob: **configuration** (env var → `.env`, no code change) and **
 | `RLA_EMBEDDING_MODEL` | `gemini-embedding-001` | — | Concept embeddings. Cache keys are model-aware, so changing it invalidates stored vectors | `text-embedding-004` is retired and 404s; this is the GA replacement |
 | `RLA_FALLBACK_MODELS` | `gemini-2.5-flash` | comma list | Ordered fallback chain | You have a second provider |
 | `RLA_FALLBACK_ON_QUOTA` | `false` | bool | Allow failover on quota exhaustion | You would rather spend the reserve than fail |
-| `RLA_STRUCTURED_OUTPUT_MODELS` | `""` | comma list | Assert that these models honour schema-constrained output, overriding LiteLLM's static table. Needed for any self-hosted server | Routing a structured stage to a local model |
+| `RLA_STRUCTURED_OUTPUT_MODELS` | `""` | comma list | Assert that these models honour schema-constrained output, overriding LiteLLM's static table. Needed for any self-hosted server. **LiteLLM route only** — the native Ollama backend grammar-constrains any schema via `format:` and answers the capability question honestly, so it needs no declaration | Routing a structured stage to a local model over LiteLLM |
+| `RLA_OLLAMA_URL` | `http://localhost:11434` | URL, no `/v1` or `/api` suffix | Native Ollama endpoint. The backend appends the path it needs, because the two routes differ: `/api/generate` grammar-constrains structured output, while the OpenAI-compatible `/v1/chat/completions` route only prefills format instructions and measured ~12x slower for the same schema | Pointing at a remote Ollama server |
+| `RLA_OLLAMA_THINK` | `false` | bool | Whether a reasoning model emits its thinking before the answer. Off by default: free-form thinking interleaved with a grammar constraint asks for trouble | A reasoning model where you want the trace |
 | `RLA_LLM_TIMEOUT_SECONDS` | `120` | `> 0` | Bound on one provider attempt | A slow provider hangs a stage |
 | `RLA_LLM_BASE_URLS` | `""` | JSON object | Per-provider base URL overrides | A gateway, proxy or self-hosted server |
 | `RLA_LLM_RPM` | `15` | `1..60` | Shared per-minute pacing, text + embeddings | Burst control; **not** the quota fix |
@@ -654,6 +685,40 @@ Two things to know:
   entity resolution needs it regardless.
 - **Verify with `rla doctor --llm`** after switching. It probes the configured backend, so a green
   answer means the local path really served the request.
+
+### Fully local (native Ollama, no Gemini key)
+
+The native Ollama backend (`OllamaBackend`, `/api/generate` with `format: <schema>`)
+needs no credential at all — only a running server. With a local embedding model
+configured, the whole pipeline runs with no Gemini key: `factory.build_client`
+and `factory.build_embedder` both treat an `ollama/…` model as usable without one.
+
+```powershell
+ollama serve
+ollama pull qwen3:4b
+ollama pull nomic-embed-text
+```
+
+```dotenv
+RLA_FAST_MODEL=ollama/qwen3:4b
+RLA_STRUCTURED_MODEL=ollama/qwen3:4b
+RLA_ANSWER_MODEL=ollama/qwen3:4b
+RLA_EMBEDDING_MODEL=ollama/nomic-embed-text
+RLA_OLLAMA_URL=http://localhost:11434
+RLA_LLM_DAILY_BUDGET=0
+```
+
+Notes:
+
+- **No `GEMINI_API_KEY` needed.** Leave it blank and the pipeline still runs every
+  stage; it degrades only when *no* configured provider is usable.
+- **A new embedding space starts `UNCALIBRATED`** (ADR-0007): automatic merging is
+  disabled and borderline pairs go to the bounded judge until a human calibrates
+  (`rla calibrate-merges` proposes; it installs nothing) and commits a threshold.
+- **Benchmark, not a gate** (measured 2026-10-02, same model/paper/schema/
+  temperature): **8.1 s** native vs **97.6 s** via LiteLLM — the native route
+  removes compatibility/prefill overhead (~4096 vs ~662 prompt tokens), not
+  intrinsic token-generation speed.
 
 ### Fresh clone → a cited answer
 

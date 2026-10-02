@@ -90,6 +90,21 @@ reads the standard variable for whichever provider you route to. For a second pr
 
 ### Which model runs each stage
 
+Model ids are canonical (`provider/model`). Every consumer — dispatch, cache keys,
+threshold lookup, display — reads the canonical form, so two subsystems cannot
+disagree about which provider a model belongs to:
+
+| Input | Result |
+|---|---|
+| `ollama/qwen3:4b` | valid → Ollama |
+| `gemini/gemini-2.5-flash` | valid → Gemini |
+| `gemini-2.5-flash` | valid → canonicalized Gemini identity |
+| `qwen3:4b` | **ERROR** — ambiguous bare id, specify `ollama/qwen3:4b` |
+| `foo/bar` | **ERROR** — unknown provider prefix |
+
+Ambiguous or unknown ids raise `ModelResolutionError` before any network request —
+never a silent guess at the configured default.
+
 | Setting | Used for | Default |
 |---|---|---|
 | `RLA_FAST_MODEL` | generic fallback | `gemini-2.5-flash-lite` |
@@ -170,6 +185,29 @@ configuration; no pipeline stage knows which provider is serving it.
 
 The router will only use the second provider for a stage if it reports support for that
 stage's capabilities — see the matrix below.
+
+### Fully local (native Ollama, no Gemini key)
+
+```powershell
+ollama serve
+ollama pull qwen3:4b
+ollama pull nomic-embed-text
+```
+
+```dotenv
+RLA_FAST_MODEL=ollama/qwen3:4b
+RLA_STRUCTURED_MODEL=ollama/qwen3:4b
+RLA_ANSWER_MODEL=ollama/qwen3:4b
+RLA_EMBEDDING_MODEL=ollama/nomic-embed-text
+RLA_OLLAMA_URL=http://localhost:11434
+RLA_LLM_DAILY_BUDGET=0
+```
+
+The native backend talks to `/api/generate` with `format: <schema>`, which measured
+~12x faster than the OpenAI-compatible route for the same schema (8.1 s vs 97.6 s).
+A new embedding space starts `UNCALIBRATED` — automatic merging stays off and
+borderline pairs go to the bounded judge until `rla calibrate-merges` proposes a
+threshold and a human commits it. See `docs/OPERATIONS_GUIDE.md` §5.
 
 ### Provider capability differences are real
 

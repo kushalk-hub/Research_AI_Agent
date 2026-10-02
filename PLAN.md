@@ -35,6 +35,7 @@ checks passed`, `rla doctor --llm` reports all three configured models reachable
 | P9 Provider routing | **achieved** | Provider is an env var; capability gate, fallback, usage accounting and 1-command provider swap all tested and validated live on Gemini. |
 | P10 Per-provider base URLs | **achieved** | `RLA_LLM_BASE_URLS` map, prefix resolution, malformed-JSON tolerance. |
 | P11 Readable answer failures | **achieved** | `rla ask` turns a multi-KB provider blob into a category + one actionable sentence. |
+| P12 Multi-provider + local inference | **achieved** | Cross-provider dispatch via `MultiBackend`; native Ollama text + embeddings; per-space merge thresholds; fully local run with no Gemini key. Benchmark, not a gate: 8.1 s native vs 97.6 s via LiteLLM. |
 | P9 (original) Polish items | **partially achieved** | README, demo script, architecture notes done. **No** architecture diagram, **no** Neo4j import script, **no** D3 export. |
 | Phase 2 full text | **not started** | `FULLTEXT` is a phase slot with a `pending` event and no implementation behind it. |
 
@@ -403,6 +404,37 @@ guidance first and the blob last so the instruction is what survives truncation.
 - **Verified** (`test_p11_answer_errors.py`): the blob is cut to 200 characters *and* the actionable
   sentence survives the cut — including the one that matters most, "this is a daily cap, not a
   burst; set `RLA_FALLBACK_ON_QUOTA=1`".
+
+### P12 — Multi-provider routing and local inference — **achieved**
+
+`ProviderRouter` stays the sole owner of precedence, capability policy, and fallback
+eligibility and ordering; `MultiBackend` (`src/rla/llm/multi.py`) implements the existing
+`RoutingBackend` protocol and resolves each model id to its owning backend, so
+cross-provider fallback needs no router change (ADR-0006). A native Ollama backend
+(`/api/generate` with `format: <schema>`, lazily constructed) and an Ollama embedding
+provider sit alongside Gemini and LiteLLM; merge thresholds are keyed per canonical
+embedding-model id, with uncalibrated spaces failing toward duplicates (ADR-0007).
+`rla calibrate-merges` proposes a threshold from the measured similarity distribution
+and installs nothing — a human commits it.
+
+- **Achieved:** four-rung precedence with a transient session override above the
+  explicit `model=` argument (`test_p12_tui_wiring.py`, `test_p12_cli_and_doctor.py`);
+  `MultiBackend` dispatch and lazy construction (`test_p12_multi_backend.py`,
+  `test_p12_providers.py`); native Ollama structured output and capability honesty
+  (`test_p12_ollama_backend.py`); Ollama embeddings with canonical cache keys
+  (`test_p12_embeddings.py`); per-space thresholds and propose-without-install
+  calibration (`test_p12_calibration.py`); a fully local run with no Gemini key.
+- **Benchmark, not a gate** (measured 2026-10-02, same model/paper/schema/temperature):
+  **8.1 s** native vs **97.6 s** via LiteLLM. The native route removes
+  compatibility/prefill overhead (~4096 vs ~662 prompt tokens), not intrinsic
+  token-generation speed. Latency depends on model load and machine state, so this
+  is recorded, not asserted.
+- **Partially achieved:** the TUI routing surface is split — the router-side pieces
+  (session overrides, `on_fallback`, precedence) are done; panel, widgets and status
+  rows belong to the TUI workstream.
+- **Not achieved:** `OllamaBackend.stream_text` still uses synchronous HTTP and must
+  become non-blocking before the TUI answer-stream path ships; no second remote
+  provider has been exercised live.
 
 ### Phase 2 (explicitly outside the MVP) — **not started**
 
