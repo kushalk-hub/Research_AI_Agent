@@ -18,7 +18,7 @@ Fastest way to confirm the install is healthy.
 rla doctor          # config, enabled sources, cache state
 rla events          # the 10 pipeline phases, in order
 rla stats           # corpus + graph summary
-rla --help          # all 10 commands
+rla --help          # all 12 commands
 ```
 
 **Expected:** `doctor` lists 5 keyless sources enabled, SerpApi marked `disabled`, and
