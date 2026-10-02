@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
 from contextlib import suppress
@@ -591,6 +592,71 @@ def eval() -> None:
     console.print(f"  JSON:   {eval_dir / 'results.json'}")
 
 
+def _tui_available_models(settings: Settings) -> tuple[str, ...]:
+    """Canonical model ids the TUI selector may offer, most relevant first.
+
+    The two role models, then the configured fallbacks, de-duplicated: the
+    selector chooses among models the run is already configured to use, never
+    an arbitrary id that would bypass capability gating or cache identity.
+    """
+    ordered = [
+        settings.model_for_structured,
+        settings.model_for_answer,
+        *settings.configured_fallbacks,
+    ]
+    seen: list[str] = []
+    for model in ordered:
+        canonical = settings.canonical_model(model)
+        if canonical not in seen:
+            seen.append(canonical)
+    return tuple(seen)
+
+
+def _tui_connect_router(state: Any, router: Any) -> None:
+    """Register the TUI as a fallback observer, if that side exists yet.
+
+    `connect_router` lives on Agent C's side of `rla.tui`; until it lands there
+    is nothing to register on and the TUI simply shows no fallback traffic.
+    """
+    try:
+        import rla.tui as _tui
+    except ImportError:
+        return
+    hook = getattr(_tui, "connect_router", None)
+    if hook is None:
+        try:
+            import rla.tui.app as _tui_app
+        except ImportError:
+            return
+        hook = getattr(_tui_app, "connect_router", None)
+    if hook is None:
+        return
+    hook(state, router)
+
+
+def _tui_app_kwargs(app_cls: type, settings: Settings, router: Any) -> dict[str, Any]:
+    """Extra `RlaApp` kwargs the TUI side understands, or nothing at all.
+
+    Agent C's side accepts `available_models` and `router`; before it lands --
+    and whenever the router is `None` in degrade mode -- the app is built
+    exactly as before, so an old signature never sees an unexpected keyword.
+    """
+    if router is None:
+        return {}
+    try:
+        params = inspect.signature(app_cls).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    names = {p.name for p in params}
+    wildcard = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params)
+    kwargs: dict[str, Any] = {}
+    if "available_models" in names or wildcard:
+        kwargs["available_models"] = _tui_available_models(settings)
+    if "router" in names or wildcard:
+        kwargs["router"] = router
+    return kwargs
+
+
 @app.command()
 def tui(
     title: Annotated[str, typer.Option("--title", "-t", help="Research project title.")] = "",
@@ -634,6 +700,13 @@ def tui(
         console.print("[yellow]no GEMINI_API_KEY set;[/] LLM stages will be skipped.")
 
     pipeline, cache, result, router = _build_pipeline(settings)
+    if router is not None:
+        if hasattr(state, "role_models"):
+            state.role_models = {
+                "structured": settings.canonical_model(settings.model_for_structured),
+                "answer": settings.canonical_model(settings.model_for_answer),
+            }
+        _tui_connect_router(state, router)
 
     async def _events():
         try:
@@ -642,7 +715,7 @@ def tui(
         finally:
             cache.close()
 
-    RlaApp(state, _events()).run()
+    RlaApp(state, _events(), **_tui_app_kwargs(RlaApp, settings, router)).run()
 
 
 @app.command()
