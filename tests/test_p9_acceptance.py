@@ -14,6 +14,7 @@ import pytest
 from pydantic import BaseModel, Field
 
 from rla.config import Settings
+from rla.errors import ModelResolutionError
 from rla.llm.embeddings import Embedder
 from rla.llm.factory import build_backend, build_client, build_embedder
 from rla.llm.gemini import GeminiClient
@@ -330,23 +331,31 @@ async def test_a4_embeddings_are_measured_and_reported(tmp_path):
 
 
 async def test_a4_embedding_cache_keys_are_model_aware(tmp_path):
-    """A vector from one model must never be served to another."""
-    from rla.models import content_hash
+    """A vector from one model must never be served to another.
+
+    Ids are canonical, so two spellings of ONE model share an entry while two
+    different models never do.
+    """
+    from rla.models import content_hash  # noqa: F401
 
     settings = Settings(
+        _env_file=None,
         gemini_api_key="k",
         data_dir=tmp_path,
         raw_dir=tmp_path / "raw",
         graph_dir=tmp_path / "graph",
-        embedding_model="model-a",
+        embedding_model="ollama/nomic-embed-text",
     )
     embedder = Embedder(settings, Cache(tmp_path / "c.db"), CostTracker())
-    key_a = embedder._key("same text")
 
-    settings.embedding_model = "model-b"
+    key_a = embedder._key("same text")
+    settings.embedding_model = "ollama/other-embed"
     key_b = embedder._key("same text")
     assert key_a != key_b
-    del content_hash
+
+    settings.embedding_model = "nomic-embed-text"
+    with pytest.raises(ModelResolutionError):
+        embedder._key("same text")
 
 
 # ---------------------------------------------------------------------------

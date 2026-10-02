@@ -37,6 +37,33 @@ class EmbedderClient(Protocol):
     async def embed_many(self, texts: Sequence[str]) -> list[list[float]]: ...
 
 
+class EmbeddingProvider(Protocol):
+    """What entity resolution needs from an embedding backend.
+
+    Declared so the pipeline can be pointed at Gemini or at a local Ollama model by
+    configuration alone. `key` is part of the contract rather than an
+    implementation detail: the embedding model id is part of the cache identity,
+    so vectors from two different models can never be served to, or compared
+    with, each other.
+    """
+
+    @property
+    def model_id(self) -> str:
+        """Canonical `provider/model` id, and part of the cache key."""
+        ...
+
+    @property
+    def dimensions(self) -> int | None:
+        """Measured width, or None before the first successful call."""
+        ...
+
+    def key(self, text: str) -> str: ...
+
+    async def embed_one(self, text: str) -> list[float]: ...
+
+    async def embed_many(self, texts: Sequence[str]) -> list[list[float]]: ...
+
+
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
     """Cosine similarity, with an explicit failure on mismatched dimensions.
 
@@ -93,6 +120,8 @@ def describe(vector: Sequence[float]) -> dict[str, Any]:
 
 __all__ = [
     "EmbedderClient",
+    "EmbeddingDimensionMismatch",
+    "EmbeddingProvider",
     "assert_uniform_dimension",
     "batch_cosine",
     "cosine",

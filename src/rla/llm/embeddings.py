@@ -56,10 +56,17 @@ class Embedder:
             self._client = genai.Client(api_key=self.settings.gemini_api_key)
         return self._client
 
+    @property
+    def model_id(self) -> str:
+        """Canonical id. Keeps Gemini and a local model from sharing a cache entry."""
+        return self.settings.canonical_model(self.settings.embedding_model)
+
     def _key(self, text: str) -> str:
-        # Model-aware by construction: a different embedding model cannot be served
-        # a vector produced by another, which would compare incomparable spaces.
-        return "embed:" + content_hash(self.settings.embedding_model, text)
+        return "embed:" + content_hash(self.model_id, text)
+
+    def key(self, text: str) -> str:
+        """Public cache identity, part of the `EmbeddingProvider` contract."""
+        return self._key(text)
 
     async def embed_one(self, text: str) -> list[float]:
         cache_key = self._key(text)

@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from rla.config import Settings, get_settings
+from rla.llm.embedding_base import EmbeddingProvider
 from rla.llm.embeddings import Embedder
 from rla.llm.router import ProviderRouter
 from rla.store.cache import Cache, CostTracker
@@ -68,15 +69,20 @@ def build_embedder(
     settings: Settings | None = None,
     cache: Cache | None = None,
     tracker: CostTracker | None = None,
-) -> Embedder | None:
-    """Build the embedder, or None without a key.
+) -> EmbeddingProvider | None:
+    """Build the embedder for the configured embedding model's provider.
 
-    Only the direct Gemini embedder is wired for now. A LiteLLM embedding backend is
-    deliberately not stubbed in: half-implemented embedding routing would be worse
-    than none, because a dimension mismatch is exactly the failure that must not
-    appear silently. See the migration plan's open questions.
+    Returns None when no provider is usable. Note this is deliberately *not* keyed
+    on the Gemini credential: with a local embedding model configured, a fully
+    local pipeline must not require a Gemini key at all.
     """
     settings = settings or get_settings()
+    model = settings.canonical_model(settings.embedding_model)
+    provider = model.split("/", 1)[0]
+    if provider == "ollama":
+        from rla.llm.ollama_embedder import OllamaEmbedder
+
+        return OllamaEmbedder(settings, cache, tracker)
     if not settings.gemini_api_key:
         return None
     return Embedder(settings, cache, tracker)
