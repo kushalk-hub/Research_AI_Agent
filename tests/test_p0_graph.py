@@ -14,7 +14,7 @@ from rla.store.graph_store import (
 
 
 def test_node_and_edge_types_land_in_the_graph(papers):
-    graph, _report = build_graph(
+    graph, _counts, _violations = build_graph(
         papers,
         [Concept(id="c:gat", name="graph attention networks", first_seen_year=2018)],
         [Relation(source_id="p1", target_id="c:gat", edge_type=EdgeType.INTRODUCES)],
@@ -25,32 +25,34 @@ def test_node_and_edge_types_land_in_the_graph(papers):
 
 
 def test_citation_edges_come_from_ground_truth(papers):
-    graph, report = build_graph(papers, [], [])
+    graph, counts, _ = build_graph(papers, [], [])
     assert graph.has_edge("p2", "p1", key="CITES")
-    assert report["citations"] == 1
+    assert counts.citations == 1
     assert graph.get_edge_data("p2", "p1", "CITES")["ground_truth"] is True
 
 
 def test_citation_edges_skip_unknown_ids(papers):
     papers[0].references.append("p-does-not-exist")
-    graph, _ = build_graph(papers, [], [])
+    graph, _, _ = build_graph(papers, [], [])
     assert "p-does-not-exist" not in graph.nodes
 
 
 def test_relations_with_unknown_endpoints_are_skipped(papers):
-    graph, report = build_graph(
+    graph, counts, _ = build_graph(
         papers,
         [],
         [Relation(source_id="p1", target_id="c:ghost", edge_type=EdgeType.USES)],
     )
-    assert report["derived_edges"] == 0
+    assert counts.added == 0
     assert "c:ghost" not in graph.nodes
 
 
 def test_duplicate_edges_are_not_repeated(papers):
     relation = Relation(source_id="p1", target_id="c:gat", edge_type=EdgeType.USES)
-    graph, report = build_graph(papers, [Concept(id="c:gat", name="gat")], [relation, relation])
-    assert report["derived_edges"] == 1
+    graph, counts, _ = build_graph(
+        papers, [Concept(id="c:gat", name="gat")], [relation, relation]
+    )
+    assert counts.added == 1
     assert stats(graph)["edges_USES"] == 1
 
 
@@ -68,8 +70,8 @@ def test_temporal_constraint_drops_backwards_edges(papers):
             relation=RelationType.EXTENDS,
         )
     ]
-    graph, report = build_graph(papers, concepts, relations)
-    assert report["temporal_violations_dropped"] == 1
+    graph, _, violations = build_graph(papers, concepts, relations)
+    assert len(violations) == 1
     assert not graph.has_edge("c:old", "c:new", key="EXTENDS")
 
 
@@ -86,8 +88,8 @@ def test_temporal_constraint_allows_forward_edges(papers):
             relation=RelationType.EXTENDS,
         )
     ]
-    graph, report = build_graph(papers, concepts, relations)
-    assert report["temporal_violations_dropped"] == 0
+    graph, _, violations = build_graph(papers, concepts, relations)
+    assert len(violations) == 0
     assert graph.has_edge("c:old", "c:new", key="EXTENDS")
 
 
@@ -96,14 +98,14 @@ def test_temporal_constraint_drops_same_year_edges(papers):
         Concept(id="c:a", name="a", first_seen_year=2020),
         Concept(id="c:b", name="b", first_seen_year=2020),
     ]
-    graph, _ = build_graph(papers, concepts, [])
+    graph, _, _ = build_graph(papers, concepts, [])
     graph.add_edge("c:a", "c:b", key="EXTENDS", type="EXTENDS")
     assert len(enforce_temporal_constraints(graph)) == 1
     assert not graph.has_edge("c:a", "c:b", key="EXTENDS")
 
 
 def test_temporal_constraint_ignores_missing_years(papers):
-    graph, _ = build_graph(
+    graph, _, _ = build_graph(
         papers,
         [Concept(id="c:a", name="a"), Concept(id="c:b", name="b")],
         [],
@@ -114,13 +116,15 @@ def test_temporal_constraint_ignores_missing_years(papers):
 
 
 def test_temporal_constraint_only_applies_to_concept_concept(papers):
-    graph, _ = build_graph(papers, [Concept(id="c:gat", name="gat", first_seen_year=2030)], [])
+    graph, _, _ = build_graph(
+        papers, [Concept(id="c:gat", name="gat", first_seen_year=2030)], []
+    )
     graph.add_edge("p1", "c:gat", key="REPLACES", type="REPLACES")
     assert enforce_temporal_constraints(graph) == []
 
 
 def test_temporal_constraint_leaves_other_edge_types_alone(papers):
-    graph, _ = build_graph(
+    graph, _, _ = build_graph(
         papers,
         [
             Concept(id="c:a", name="a", first_seen_year=2020),
@@ -166,14 +170,60 @@ def test_subgraph_payload_keeps_only_requested_nodes(graph_and_papers):
 
 
 def test_paper_nodes_carry_year_for_traversal():
-    graph, _ = build_graph([Paper(id="p1", title="T", year=2018)], [], [])
+    graph, _, _ = build_graph([Paper(id="p1", title="T", year=2018)], [], [])
     assert graph.nodes["p1"]["year"] == 2018
 
 
 def test_graphml_export_flattens_list_attributes(tmp_path):
     paper = Paper(id="p1", title="T", year=2018, authors=["Ada"], sources=["openalex", "arxiv"])
-    graph, _ = build_graph([paper], [], [])
+    graph, _, _ = build_graph([paper], [], [])
     graphml_path = tmp_path / "graph.graphml"
     save(graph, tmp_path / "graph.json", graphml_path)
     text = graphml_path.read_text("utf-8")
     assert "openalex;arxiv" in text
+
+
+def test_only_the_relation_whose_endpoints_exist_is_added(tmp_path):
+    """Both relations are checked against the SAME node set.
+
+    `c:other` does not exist, so that EXTENDS is refused; `ghost` does not
+    exist, so that USES is refused too. One added, one refused -- and the
+    unknown paper id is NOT materialised, because a refused relation is not a
+    reason to invent a node.
+    """
+    from rla.models import Concept, EdgeType, Paper, Relation
+    from rla.store.graph_store import build_graph
+
+    graph, counts, violations = build_graph(
+        [Paper(id="in-corpus", title="P", year=2024)],
+        [
+            Concept(id="c:real", name="Real", first_seen_year=2020),
+            Concept(id="c:other", name="Other", first_seen_year=2021),
+        ],
+        [
+            Relation(source_id="c:real", target_id="c:other", edge_type=EdgeType.EXTENDS),
+            Relation(source_id="ghost", target_id="c:real", edge_type=EdgeType.USES),
+        ],
+    )
+
+    assert counts.added == 1
+    assert counts.skipped_missing_endpoint == 1
+    assert "ghost" not in graph.nodes
+    assert violations == []
+
+
+def test_a_fully_unresolvable_relation_set_adds_nothing(tmp_path):
+    from rla.models import Concept, EdgeType, Paper, Relation
+    from rla.store.graph_store import build_graph
+
+    graph, counts, _ = build_graph(
+        [Paper(id="p", title="P", year=2024)],
+        [Concept(id="c:real", name="Real", first_seen_year=2020)],
+        [
+            Relation(source_id="c:real", target_id="c:absent", edge_type=EdgeType.EXTENDS),
+            Relation(source_id="ghost", target_id="c:real", edge_type=EdgeType.USES),
+        ],
+    )
+
+    assert counts.added == 0
+    assert counts.skipped_missing_endpoint == 2

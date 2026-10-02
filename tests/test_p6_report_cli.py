@@ -62,7 +62,7 @@ def prepared(tmp_path: Path):
     for row in EXTRACTIONS:
         store.add(Extraction.model_validate(row))
 
-    graph, _ = build_graph(
+    graph, _, _ = build_graph(
         corpus.papers,
         [
             Concept(id="c:gat", name="graph attention networks", first_seen_year=2018),

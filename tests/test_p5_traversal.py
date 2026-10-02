@@ -107,7 +107,7 @@ RELATIONS = [
 
 @pytest.fixture
 def fixture_graph():
-    graph, _ = build_graph(PAPERS, CONCEPTS, RELATIONS)
+    graph, _, _ = build_graph(PAPERS, CONCEPTS, RELATIONS)
     return graph
 
 

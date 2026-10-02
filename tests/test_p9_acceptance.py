@@ -296,7 +296,7 @@ async def test_a3_the_pipeline_answer_stage_consumes_a_stream(tmp_path):
     relation = Relation(
         source_id="p1", target_id="c:gat", edge_type=EdgeType.INTRODUCES, relation=None
     )
-    graph, _ = build_graph(
+    graph, _, _ = build_graph(
         [paper],
         [Concept(id="c:gat", name="graph attention networks", first_seen_year=2018)],
         [relation],

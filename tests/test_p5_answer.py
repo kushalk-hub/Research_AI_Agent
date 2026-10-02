@@ -76,7 +76,7 @@ class FakeLLM(LLMClient):
 
 @pytest.fixture
 def graph():
-    g, _ = build_graph(PAPERS, CONCEPTS, RELATIONS)
+    g, _, _ = build_graph(PAPERS, CONCEPTS, RELATIONS)
     return g
 
 
@@ -183,7 +183,7 @@ async def test_an_empty_subgraph_is_reported_rather_than_answered():
 
 async def test_a_concept_with_no_edges_still_produces_a_minimal_subgraph():
     """A lone concept is traversable even with no lineage under it."""
-    g, _ = build_graph([PAPERS[0]], [CONCEPTS[2]], [])
+    g, _, _ = build_graph([PAPERS[0]], [CONCEPTS[2]], [])
     result, _ = await answer_question_result(g, "lineage of agent graphs", FakeLLM())
     assert result is not None
     from rla.models import NodeType

@@ -124,6 +124,22 @@ def _print_event(evt: Event) -> None:
     console.print(f"[{style}]{str(evt.phase):<9}[/] [{style}]{marker}[/] {evt.message}")
 
 
+def _red_or_zero(count: int) -> str:
+    return f"[red]{count}[/]" if count else "0"
+
+
+def _yellow_or_zero(count: int) -> str:
+    return f"[yellow]{count}[/]" if count else "0"
+
+
+def _summarise_ids(values: list[str], limit: int = 10) -> str:
+    """One line of paper ids for `status`: capped so a large drift stays readable."""
+    shown = ", ".join(values[:limit])
+    if len(values) > limit:
+        shown += f", +{len(values) - limit} more"
+    return shown
+
+
 def _build_pipeline(
     settings: Settings | None = None,
 ) -> tuple[Pipeline, Cache, PipelineResult, Any]:
@@ -684,6 +700,102 @@ def _tui_app_kwargs(app_cls: type, settings: Settings, router: Any) -> dict[str,
     if "router" in names or wildcard:
         kwargs["router"] = router
     return kwargs
+
+
+@app.command()
+def status(
+    prune: Annotated[
+        bool, typer.Option("--prune", help="Delete entries that do not describe this corpus.")
+    ] = False,
+) -> None:
+    """Report whether the corpus, extraction store and graph describe each other.
+
+    Read-only unless `--prune`. Costs nothing: no network, no model, no LLM budget.
+    """
+    from rla.models import Corpus, NodeType
+    from rla.store.extraction_store import ExtractionStore, reconcile
+
+    settings = get_settings()
+    if not settings.corpus_path.exists():
+        console.print(f"[red]no corpus at[/] {settings.corpus_path}")
+        raise typer.Exit(code=1)
+
+    corpus = Corpus.model_validate_json(settings.corpus_path.read_text("utf-8"))
+    store = ExtractionStore(settings.extractions_path)
+    report = reconcile(corpus, store)
+    corpus_ids = {paper.id for paper in corpus.papers}
+
+    graph = load_graph(settings.graph_json) if settings.graph_json.exists() else None
+    graph_ids: set[str] = set()
+    if graph is not None:
+        graph_ids = {
+            node
+            for node, data in graph.nodes(data=True)
+            if data.get("type") == str(NodeType.PAPER)
+        }
+    graph_missing = sorted(corpus_ids - graph_ids) if graph is not None else []
+    graph_stale = sorted(graph_ids - corpus_ids) if graph is not None else []
+
+    table = Table(title="rla status", show_header=True, header_style="bold")
+    table.add_column("check")
+    table.add_column("value")
+    table.add_row("corpus papers", str(len(corpus.papers)))
+    table.add_row("stored extractions", str(len(store)))
+    table.add_row("matched", str(report.matched))
+    table.add_row("stale", _red_or_zero(len(report.stale)))
+    table.add_row("superseded", _red_or_zero(len(report.superseded)))
+    table.add_row("missing", _yellow_or_zero(len(report.missing)))
+    table.add_row("graph nodes", str(graph.number_of_nodes()) if graph else "[dim]none[/]")
+    table.add_row("graph edges", str(graph.number_of_edges()) if graph else "[dim]none[/]")
+    table.add_row("graph missing papers", _yellow_or_zero(len(graph_missing)))
+    table.add_row("graph stale papers", _red_or_zero(len(graph_stale)))
+    console.print(table)
+
+    if report.stale:
+        console.print(
+            f"[red]stale extractions:[/] {_summarise_ids([e.paper_id for e in report.stale])}"
+        )
+    if report.superseded:
+        console.print(
+            "[red]superseded extractions:[/] "
+            f"{_summarise_ids([f'{e.paper_id}@{e.paper_hash[:8]}' for e in report.superseded])}"
+        )
+    if report.missing:
+        console.print(f"[yellow]missing extractions:[/] {_summarise_ids(report.missing)}")
+    if graph_stale:
+        console.print(f"[red]graph stale papers:[/] {_summarise_ids(graph_stale)}")
+    if graph_missing:
+        console.print(f"[yellow]graph missing papers:[/] {_summarise_ids(graph_missing)}")
+
+    if not report.intact:
+        console.print(f"[red]{report.advice}[/]")
+    elif graph_stale:
+        console.print(
+            "[red]the graph on disk contains papers that are not in the corpus; "
+            "it is from an older build - re-run `rla run`[/]"
+        )
+    elif graph_missing:
+        console.print(
+            f"[yellow]the graph is missing {len(graph_missing)} corpus paper(s)[/]"
+        )
+    elif graph is None:
+        console.print("[yellow]no graph has been built yet - run `rla run` to build one[/]")
+    elif not report.missing:
+        console.print("[green]the corpus, extraction store and graph agree[/]")
+        return
+    else:
+        console.print(f"[yellow]{report.advice}[/]")
+
+    if not prune:
+        console.print("[dim]re-run with --prune to delete the stale and superseded entries[/]")
+        return
+
+    from rla.store.extraction_store import prune_stale
+
+    removed = prune_stale(corpus, store)
+    if removed:
+        console.print(f"[green]pruned {len(removed)} entry(ies):[/] {', '.join(removed)}")
+    console.print("[dim]re-run `rla run` to extract the missing papers[/]")
 
 
 @app.command()
