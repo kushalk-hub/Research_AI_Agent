@@ -25,9 +25,12 @@ this file links to those rather than duplicating them.
 ## Installation (fresh Windows machine)
 
 ```powershell
+git clone <repo-url>
+Set-Location Research_AI_Agent
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 .\.venv\Scripts\python.exe -m pip install -e ".[dev,tui]"
+Copy-Item .env.example .env
 ```
 
 Use the venv's tools for everything below (`python`, `pytest`, `ruff` from
@@ -36,15 +39,7 @@ that reports false hits.
 
 ## Repository setup
 
-```powershell
-git clone <repo-url>
-Set-Location Research_AI_Agent
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev,tui]"
-Copy-Item .env.example .env
-```
-
-`data/graph/` is gitignored, so a fresh clone has **no graph**. Run `rla run` or
+Clone first (see Installation above), then note: `data/graph/` is gitignored, so a fresh clone has **no graph**. Run `rla run` or
 `rla build` before `rla eval` / `rla ask` (both fail with `FileNotFoundError` /
 "no graph" otherwise).
 
@@ -145,8 +140,7 @@ report are keyless).
 
 ## CLI reference
 
-Verified against `src/rla/cli.py`. Prompts interactively for `-t` when omitted
-(`build`, `run`, `tui`); `ask` takes the question as a positional argument.
+Verified against `src/rla/cli.py`. Prompts interactively for `-t` when omitted (`build`, `run`, `tui`); `ask` takes the question as a positional argument and prompts when omitted.
 
 | Command | What it does | Needs a key? |
 |---|---|---|
@@ -157,7 +151,7 @@ Verified against `src/rla/cli.py`. Prompts interactively for `-t` when omitted
 | `rla build -t "Topic" [--jsonl] [--structured-model M] [--answer-model M]` | acquisition only (40–100 papers) | no |
 | `rla run -t "Topic" [-q "Q"] [--jsonl] [--structured-model M] [--answer-model M]` | full pipeline, streaming events | degrades without a key |
 | `rla ask "Q" [--markdown] [--jsonl]` | answer from the built graph; no re-acquisition | yes, for the answer |
-| `rla report [--markdown/--no-markdown] [--jsonl]` | per-paper limitations + synthesized gaps; costs no LLM calls | no |
+| `rla report [--markdown] [--jsonl]` | per-paper limitations + synthesized gaps; costs no LLM calls | no |
 | `rla status [--prune]` | corpus/store/graph agreement; `--prune` deletes stale+superseded | no |
 | `rla calibrate-merges` | propose (not install) a merge threshold for the embedding model | yes (embeddings) |
 | `rla eval` | evaluation report → `data/eval/report.md` + `results.json` | no |
