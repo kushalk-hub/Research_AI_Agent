@@ -752,7 +752,7 @@ def test_an_override_does_not_leak_to_another_role(tmp_path):
 
     asyncio.run(router.generate_text("x", stage="answer"))
 
-    assert backend.calls[-1][0] == "answer"
+    assert backend.calls[-1] == ("answer", router.settings.model_for_answer)
 
 
 def test_a_fallback_is_reported_to_the_observer(tmp_path):
