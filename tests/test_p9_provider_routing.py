@@ -799,27 +799,21 @@ class RecordingBackend(FakeBackend):
         return False
 
 
-def _multi(tmp_path, backend, **kw):
-    from rla.llm.multi import MultiBackend
-
-    settings = Settings(
-        _env_file=None,
-        gemini_api_key="k",
-        data_dir=tmp_path,
-        raw_dir=tmp_path / "raw",
-        graph_dir=tmp_path / "graph",
-        **kw,
-    )
-    return MultiBackend(settings, None, None), backend
-
-
-async def test_one_run_uses_three_providers_and_a_cross_provider_fallback(tmp_path):
+async def test_one_run_uses_three_providers_and_a_cross_provider_fallback(
+    tmp_path, monkeypatch
+):
     """The headline guarantee: Ollama for the bulk, Gemini for answers,
-    OpenRouter as the external fallback -- all in a single run."""
+    OpenRouter as the external fallback -- all in a single run.
+
+    Routed through the REAL `MultiBackend` (with pre-populated fake owning
+    backends) so `ProviderRouter` -> `MultiBackend` -> owning backend is genuinely
+    exercised, not just the router against one backend."""
+    from rla.llm.multi import MultiBackend
     from rla.llm.router import ProviderRouter
 
-    backend = RecordingBackend("fake")
-    multi, backend = _multi(tmp_path, backend)
+    ollama = RecordingBackend("ollama")
+    gemini = RecordingBackend("gemini")
+    openrouter = RecordingBackend("openrouter")
     settings = Settings(
         _env_file=None,
         gemini_api_key="k",
@@ -830,15 +824,28 @@ async def test_one_run_uses_three_providers_and_a_cross_provider_fallback(tmp_pa
         answer_model="gemini/gemini-2.5-flash",
         fallback_models="openrouter/backup:free,ollama/second:4b",
     )
-    router = ProviderRouter(backend, settings)
+    facade = MultiBackend(settings, None, None)
+    monkeypatch.setattr(
+        facade,
+        "_backends",
+        {"ollama": ollama, "gemini": gemini, "openrouter": openrouter},
+    )
+    router = ProviderRouter(facade, settings)
 
-    # structured stages go to the configured role model
+    # structured stages go to the configured role model, via the facade
     await router.generate_structured("x", Out, stage="extraction")
-    assert backend.calls[-1] == ("extraction", "ollama/qwen3:4b")
+    assert ollama.calls[-1] == ("extraction", "ollama/qwen3:4b")
 
-    # answers go to a different provider
+    # answers go to a different provider, via the facade
     await router.generate_text("x", stage="answer")
-    assert backend.calls[-1] == ("answer", "gemini/gemini-2.5-flash")
+    assert gemini.calls[-1] == ("answer", "gemini/gemini-2.5-flash")
+
+    # a fault on the bulk provider is served by the third provider, same run
+    ollama.fail["ollama/qwen3:4b"] = ProviderServerError("503")
+    text = await router.generate_text("x", stage="extraction")
+    assert text == "text from openrouter/backup:free"
+    assert openrouter.calls[-1] == ("extraction", "openrouter/backup:free")
+    assert router.fallbacks, "the router must record the cross-provider failover"
 
 
 async def test_a_fault_on_one_provider_fails_over_to_another(tmp_path):
