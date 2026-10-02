@@ -4,189 +4,75 @@ Ingests papers on a research topic, builds a citation-and-concept graph, and tra
 that graph to answer lineage questions ("how did technique X evolve?") and gap questions
 ("what's still unsolved in Y?") with traceable citations.
 
+This README is an operational document: how to install, configure, verify, run, and
+diagnose `rla`. Design rationale lives in `docs/` and the ADRs (see Documentation map);
+this file links to those rather than duplicating them.
+
+> **Entry point:** the `rla` console script. `python -m src.rla.cli` does **not** work
+> (src-layout package; the import name is `rla`).
+
 ---
 
-## Setup
+## Requirements
 
-**Requires Python 3.11+.** This project was built and verified on 3.12.
+- Windows, PowerShell.
+- Python 3.11+ (verified on 3.12).
+- For the TUI: **Windows Terminal** (not legacy conhost) and the `tui` extra.
+- For fully-local mode: a running Ollama server (see Ollama setup).
+- For cloud stages: a Gemini API key (see Gemini setup). Without one, the pipeline
+  runs in keyless degrade mode.
+
+## Installation (fresh Windows machine)
 
 ```powershell
-# 1. create the environment
 py -3.12 -m venv .venv
-
-# 2. install (this creates the `rla` command)
+.\.venv\Scripts\Activate.ps1
 .\.venv\Scripts\python.exe -m pip install -e ".[dev,tui]"
+```
 
-# 3. add your API key — see "API keys" below
+Use the venv's tools for everything below (`python`, `pytest`, `ruff` from
+`.venv\Scripts\`). The system Python may lack test deps and ships an older `ruff`
+that reports false hits.
+
+## Repository setup
+
+```powershell
+git clone <repo-url>
+Set-Location Research_AI_Agent
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,tui]"
 Copy-Item .env.example .env
 ```
 
-Activate it if you prefer: `.\.venv\Scripts\Activate.ps1`
-Otherwise prefix commands with `.\.venv\Scripts\`.
+`data/graph/` is gitignored, so a fresh clone has **no graph**. Run `rla run` or
+`rla build` before `rla eval` / `rla ask` (both fail with `FileNotFoundError` /
+"no graph" otherwise).
 
-> **Note:** `python -m src.rla.cli` does **not** work. This is a src-layout package and
-> the import name is `rla`. Use the `rla` command, or
-> `$env:PYTHONPATH="src"; python -m rla.cli` if you have not installed.
+## Environment configuration
 
-### Verify
+1. Copy the template: `Copy-Item .env.example .env`
+2. Fill in what your mode needs (see Supported modes). `.env` is gitignored;
+   never put a real key in `.env.example`.
+3. All variables use the `RLA_` prefix **except** `GEMINI_API_KEY`, which has an
+   explicit no-prefix alias (`src/rla/config.py`). Paths (`.env`, `data/`) resolve
+   relative to the repo root, not the CWD, so running from a subdirectory is safe.
 
-```powershell
-rla doctor          # config, sources, cache — no API key needed
-rla doctor --llm    # live check of every configured model (spends a few requests)
-```
+Full variable list: [Config reference](#config-reference) and `.env.example`.
 
----
+## Supported modes
 
-## API keys
+Only these three configurations are supported by the code:
 
-**One key, in `.env`.** Add it under `GEMINI_API_KEY`:
+| Mode | Text models | Embedding model | Needs `GEMINI_API_KEY`? |
+|---|---|---|---|
+| Fully local | `ollama/…` in all roles | `ollama/nomic-embed-text` (768 dims) | No |
+| Ollama + cloud hybrid | `ollama/…` for text | Gemini embedder | Yes (embeddings still go through Gemini) |
+| Cloud / fallback | Gemini (native) or second provider via LiteLLM `[router]` extra | `gemini-embedding-001` | Yes |
 
-```dotenv
-GEMINI_API_KEY=your-key-here
-```
+With a blank `GEMINI_API_KEY` and no usable `ollama/…` role, the pipeline runs in
+keyless degrade mode: acquisition works, LLM stages are skipped.
 
-Get one from [Google AI Studio](https://aistudio.google.com/apikey).
-
-- **Without a key** the pipeline still works. It acquires a corpus from the keyless
-  sources (Semantic Scholar, OpenAlex, arXiv, DBLP, CrossRef) and skips the LLM stages.
-  `rla build` and `rla report` are useful with no key at all.
-- **With a key** you additionally get query expansion, relevance scoring, concept
-  extraction, entity resolution, and answer generation.
-- `.env` is gitignored. `.env.example` is the committed template — never put a real key
-  in it.
-- Use an **AI Studio API key**, not `gcloud auth print-access-token` output. An OAuth
-  token returns `401` on every call and `rla doctor --llm` will say so.
-
-Other optional keys, all documented in `.env.example`: `RLA_SERPAPI_API_KEY` (adds a
-Google Scholar pass for recent preprints), `RLA_UNPAYWALL_EMAIL`, `RLA_NEO4J_*`.
-
----
-
-## Choosing a provider (LiteLLM routing)
-
-The application talks to one interface, `LLMClient`. Underneath, you can use the **native
-Google SDK** or route through **LiteLLM**. One env var switches between them — no code
-change.
-
-```dotenv
-# native Google SDK (default, no extra install)
-RLA_LLM_PROVIDER=gemini
-
-# route through LiteLLM
-RLA_LLM_PROVIDER=litellm
-```
-
-### Enabling LiteLLM
-
-LiteLLM is an **optional extra**, so the default install stays small:
-
-```powershell
-.\.venv\Scripts\python.exe -m pip install -e ".[router]"
-```
-
-It still uses the **same `GEMINI_API_KEY`**. LiteLLM does not need a separate key — it
-reads the standard variable for whichever provider you route to. For a second provider
-(e.g. OpenAI) you would add that provider's own key to `.env`.
-
-### Which model runs each stage
-
-Model ids are canonical (`provider/model`). Every consumer — dispatch, cache keys,
-threshold lookup, display — reads the canonical form, so two subsystems cannot
-disagree about which provider a model belongs to:
-
-| Input | Result |
-|---|---|
-| `ollama/qwen3:4b` | valid → Ollama |
-| `gemini/gemini-2.5-flash` | valid → Gemini |
-| `gemini-2.5-flash` | valid → canonicalized Gemini identity |
-| `qwen3:4b` | **ERROR** — ambiguous bare id, specify `ollama/qwen3:4b` |
-| `foo/bar` | **ERROR** — unknown provider prefix |
-
-Ambiguous or unknown ids raise `ModelResolutionError` before any network request —
-never a silent guess at the configured default.
-
-| Setting | Used for | Default |
-|---|---|---|
-| `RLA_FAST_MODEL` | generic fallback | `gemini-2.5-flash-lite` |
-| `RLA_STRUCTURED_MODEL` | the 4 schema-constrained stages | falls back to `fast_model` |
-| `RLA_ANSWER_MODEL` | streamed answer generation | falls back to `strong_model` |
-| `RLA_EMBEDDING_MODEL` | concept embeddings | `gemini-embedding-001` |
-| `RLA_FALLBACK_MODELS` | comma-separated fallbacks, in order | `gemini-2.5-flash` |
-
-**The free tier allows ~20 requests per model per day.** A 100-paper corpus needs ~100
-extraction calls, so keep `RLA_STRUCTURED_MODEL` on the cheap model unless you have a paid
-key. The fallback chain exists because quota is **per model** — when the fast model's
-allowance is spent, the fallback model may still have budget.
-
-### Fallback behaviour
-
-Fallback triggers only on recoverable faults: timeout, per-minute 429, 5xx, network error.
-It does **not** trigger on invalid credentials, malformed config, unsupported schema, or
-programming errors — retrying those across models just multiplies the cost of a one-line
-fix.
-
-Daily-quota exhaustion is treated as a capacity condition, not a fault, so it raises
-rather than failing over (preserving the other model's budget). Opt in with:
-
-```dotenv
-RLA_FALLBACK_ON_QUOTA=true
-```
-
-A model is only used for a structured stage if it supports schema-constrained output;
-otherwise the router refuses it rather than silently degrading to unvalidated JSON.
-
-### Per-provider base URLs
-
-Point any provider at an alternative endpoint — an OpenAI-compatible gateway, a proxy, or
-a self-hosted server — without touching code:
-
-```dotenv
-RLA_LLM_BASE_URLS={"openai": "http://localhost:8000/v1", "openrouter": "https://openrouter.ai/api/v1"}
-```
-
-Keyed by the **same provider prefix** used in model strings, so
-`openrouter/meta/llama-3` picks up the `openrouter` entry.
-
-**The prefix must be a provider LiteLLM actually recognises** — `openai`, `openrouter`,
-`groq`, `gemini`, `anthropic`. An invented name like `local` is rejected with
-`LLM Provider NOT provided` before any request goes out. To reach a custom
-OpenAI-compatible server, declare it *as* `openai` and override the endpoint:
-
-```dotenv
-RLA_LLM_BASE_URLS={"openai": "http://localhost:8000/v1"}
-RLA_FALLBACK_MODELS=openai/my-model
-```
-
-The credential sent is the one that provider reads, so the entry above sends
-`OPENAI_API_KEY` to your server.
-
-It is a **map, not a single URL**, deliberately. During cross-provider failover two
-providers are live at once, and a shared endpoint would silently break the primary.
-
-Entries are optional: an absent key means "use the provider's default endpoint", which is
-what you want for `openrouter` and `groq` since LiteLLM already knows those URLs. A bare
-model id (`gemini-2.5-flash`) is treated as the primary provider, so a `gemini` key applies
-to the project's default model strings. Malformed JSON is ignored with a warning rather than
-stopping the pipeline.
-
-Applies to the **LiteLLM path only** — the native Gemini backend talks directly to Google.
-
-### Adding a second provider
-
-```dotenv
-GEMINI_API_KEY=...          # primary
-OPENAI_API_KEY=...          # second provider, independent credential
-RLA_FALLBACK_MODELS=openai/gpt-4o-mini
-```
-
-The key is named for the **provider**, not the routing role. A `FALLBACK_API_KEY` would
-become wrong the moment that provider is promoted to primary. Provider selection stays in
-configuration; no pipeline stage knows which provider is serving it.
-
-The router will only use the second provider for a stage if it reports support for that
-stage's capabilities — see the matrix below.
-
-### Fully local (native Ollama, no Gemini key)
+## Ollama setup
 
 ```powershell
 ollama serve
@@ -203,118 +89,312 @@ RLA_OLLAMA_URL=http://localhost:11434
 RLA_LLM_DAILY_BUDGET=0
 ```
 
-The native backend talks to `/api/generate` with `format: <schema>`, which measured
-~12x faster than the OpenAI-compatible route for the same schema (8.1 s vs 97.6 s).
-A new embedding space starts `UNCALIBRATED` — automatic merging stays off and
-borderline pairs go to the bounded judge until `rla calibrate-merges` proposes a
-threshold and a human commits it. See `docs/OPERATIONS_GUIDE.md` §5.
+Notes (verified, `docs/OPERATIONS_GUIDE.md` §5):
 
-### Provider capability differences are real
+- The native backend talks to `/api/generate` (endpoints used: `/api/generate`,
+  `/api/embed`). Never route `ollama/…` models through LiteLLM's `/v1` path —
+  the same schema measured ~8 s native vs ~98 s via LiteLLM. That gap is
+  compatibility/prefill overhead (~4096 vs ~662 prompt tokens), **not** intrinsic
+  generation speed (decode floor ~55 tok/s).
+- `RLA_OLLAMA_URL` takes no `/v1` or `/api` suffix; the backend appends the path.
+- `RLA_OLLAMA_THINK=false` (default): reasoning-model thinking traces stay off.
+- Fully-local mode needs an `ollama/…` model in the roles (then no Gemini key is
+  needed at all).
 
-LiteLLM is not a universal equaliser. Structured-output support is genuinely
-provider-dependent, which is why the capability gate exists. Current status:
+## Gemini setup
 
-| Provider | Structured output | Status |
-|---|---|---|
-| Gemini (native or via LiteLLM) | server-side constrained decoding | **verified live** |
-| OpenAI (via LiteLLM) | `json_schema` strict mode | not yet exercised |
-| Anthropic (via LiteLLM) | no native constraint; weaker | not yet exercised |
+```dotenv
+GEMINI_API_KEY=your-key-here
+```
 
-Only Gemini has been validated. See
-[`docs/llm_provider_validation.md`](docs/llm_provider_validation.md).
+- Get the key from [Google AI Studio](https://aistudio.google.com/apikey). Use an
+  AI Studio key, not `gcloud auth print-access-token` output (OAuth tokens return
+  401; `rla doctor --llm` says so).
+- Canonical answer model: `gemini/gemini-2.5-flash`. The configured model must be
+  servable on your key — a 404 means retired/renamed/tier-gated, so pick a current
+  model in `.env`.
+- Never print or commit real keys. `rla doctor --llm` performs live (deliberately
+  **uncached**) probes and spends a few requests.
+- Free-tier quota is per day, per model (~20 req/day observed). `llm_rpm` pacing
+  does not help; `llm_daily_budget` (default 15) is a local per-run cap.
 
----
+## Embedding config
 
-## Commands
+- The text model and the embedding model are different settings. Defaults:
+  `RLA_EMBEDDING_MODEL=gemini-embedding-001` (GA replacement for retired
+  `text-embedding-004`), or `ollama/nomic-embed-text` (768 dims) for fully-local.
+- Merge thresholds belong to an embedding space (`thresholds_for()`,
+  `docs/adr/0007-per-embedding-model-merge-thresholds.md`). Never reuse 0.92/0.70
+  across spaces.
+- A new/uncalibrated embedding space starts `UNCALIBRATED`: auto-merge is
+  **disabled** (fail toward duplicates, never toward false lineage), borderline
+  pairs go to the bounded LLM judge. `rla calibrate-merges` **proposes** a
+  threshold; a human commits it. It installs nothing.
+
+## Verify installation
+
+```powershell
+rla doctor            # config, sources, cache — no key needed
+rla doctor --llm      # live probe of every configured model (spends requests)
+rla sources           # probe each source API against a throwaway cache DB
+rla events            # the 10 pipeline phases, in order
+```
+
+`rla build` / `rla report` are useful with no key at all (acquisition and gap
+report are keyless).
+
+## CLI reference
+
+Verified against `src/rla/cli.py`. Prompts interactively for `-t` when omitted
+(`build`, `run`, `tui`); `ask` takes the question as a positional argument.
 
 | Command | What it does | Needs a key? |
 |---|---|---|
-| `rla doctor [--llm]` | config, sources, cache. `--llm` probes every model live | `--llm` only |
-| `rla sources` | probe each source API to see which actually respond | no |
-| `rla stats` | summarise the stored corpus and graph | no |
-| `rla events` | print the pipeline phase order | no |
-| `rla build -t "topic"` | fetch 40-100 papers from all sources | no |
-| `rla run -t "topic" -q "question"` | full pipeline, streaming events as they happen | optional |
-| `rla ask "question"` | answer from the built graph (no re-acquisition) | for the answer |
-| `rla report` | per-paper limitations + synthesized cross-paper gaps | no |
-| `rla eval` | evaluation report → `data/eval/report.md` | no |
-| `rla tui -t "topic"` | live terminal UI (needs `textual`; use Windows Terminal) | optional |
+| `rla doctor [--llm]` | config, sources, cache; `--llm` probes models live (uncached) | `--llm` only |
+| `rla sources [--probe "q"] [--cache/--no-cache]` | probe each source API (bypasses cache by default) | no |
+| `rla stats` | corpus + graph summary tables | no |
+| `rla events` | print the 10 pipeline phases in order | no |
+| `rla build -t "Topic" [--jsonl] [--structured-model M] [--answer-model M]` | acquisition only (40–100 papers) | no |
+| `rla run -t "Topic" [-q "Q"] [--jsonl] [--structured-model M] [--answer-model M]` | full pipeline, streaming events | degrades without a key |
+| `rla ask "Q" [--markdown] [--jsonl]` | answer from the built graph; no re-acquisition | yes, for the answer |
+| `rla report [--markdown/--no-markdown] [--jsonl]` | per-paper limitations + synthesized gaps; costs no LLM calls | no |
+| `rla status [--prune]` | corpus/store/graph agreement; `--prune` deletes stale+superseded | no |
+| `rla calibrate-merges` | propose (not install) a merge threshold for the embedding model | yes (embeddings) |
+| `rla eval` | evaluation report → `data/eval/report.md` + `results.json` | no |
+| `rla tui -t "Topic" [-q "Q"] [--structured-model M] [--answer-model M]` | live terminal UI over the same event stream as `run` | degrades without a key |
 
-Add `--jsonl` to `run`, `ask`, or `report` for machine-readable output.
-
-### Typical first run
+Examples:
 
 ```powershell
-rla sources                 # confirm the source APIs work
+rla sources
 rla build -t "Graph-based agent architectures"
 rla run -t "Graph-based agent architectures" -q "How did GAT evolve?"
+rla run -t "Graph Attention Networks" -q "How did GAT evolve?" --jsonl
+rla ask "How did GAT evolve?" --markdown
+rla report --jsonl
+rla status
+rla status --prune
+rla eval
 ```
 
-`rla ask` and `rla eval` need `data/graph/graph.json`, which only exists after a run that
-built a graph. That path is gitignored, so a fresh clone has no graph.
+## TUI guide
 
----
-
-## Development
+Verified against `src/rla/tui/app.py` (`BINDINGS`, `HELP_TEXT`).
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -q      # 529 tests, ~68s
-.\.venv\Scripts\python.exe -m ruff check src/ tests/  # lint
+rla tui -t "Graph Attention Networks" -q "How did GAT evolve?"
 ```
 
-Run a single module or test:
+Requires the `tui` extra and **Windows Terminal** (not conhost). 80×24 works.
+The TUI subscribes to the same event stream as `rla run`, so it cannot drift
+from headless output. Rule of thumb: debug with `rla run`, demo with `rla tui`.
+
+Panels: status (phase + clock) · counters · routing
+(configured/override/resolved) · selector (session only) · log (wraps, no deltas)
+· tree · answer (deltas + citations).
+
+| Key | Action |
+|---|---|
+| `q` | quit |
+| `c` | clear log |
+| `m` | toggle model selector |
+| `e` | cycle structured-role model |
+| `a` | cycle answer-role model |
+| `x` | clear session overrides |
+| `?` | this help overlay |
+
+The model selector offers the two role models plus configured fallbacks
+(de-duplicated); cycling sets a transient session override (see next section),
+never writes `.env`. Fallback traffic is visible in the UI when the router side
+is connected.
+
+## Model selection, routing, fallback
+
+- **Model identity.** Canonical form is `provider/model`. `ollama/qwen3:4b` is
+  valid; `gemini/gemini-2.5-flash` is canonical. A bare `qwen3:4b` raises
+  `ModelResolutionError` (ambiguous); `foo/bar` raises it (unknown provider).
+  Resolution happens before any network request, never a silent guess. Details:
+  `docs/OPERATIONS_GUIDE.md` §3.4.
+- **Precedence** (highest first): session override (TUI selector or
+  `--structured-model` / `--answer-model` flags) > explicit `model=` call-site
+  argument > stage role (`answer` → `RLA_ANSWER_MODEL` → `RLA_STRONG_MODEL`;
+  structured stages → `RLA_STRUCTURED_MODEL` → `RLA_FAST_MODEL`; other stages →
+  `RLA_FAST_MODEL`) > nothing (no heuristics, no load balancing).
+- **Fallback** is error-category-driven and distinct from retry: it fires on
+  `timeout`, per-minute 429, 5xx, network errors. It does **not** fire on bad
+  credentials, malformed config, unsupported schema, or programming errors.
+  Daily-quota exhaustion raises rather than failing over unless
+  `RLA_FALLBACK_ON_QUOTA=true`. Streaming never falls back mid-stream.
+- **Capability gate.** A model is used for a structured stage only if it supports
+  schema-constrained output; otherwise the router refuses it rather than
+  degrading to unvalidated JSON. Native `ollama/…` grammar-constrains via
+  `format:` and needs no declaration. See `docs/OPERATIONS_GUIDE.md` §3.5.
+- Multi-backend dispatch: `docs/adr/0006-multi-provider-dispatch.md`.
+
+## Data and status operations
+
+Files each phase writes: `docs/OPERATIONS_GUIDE.md` §1 (corpus, extractions,
+concepts, graph, cache, eval outputs).
+
+`rla status` reports per-entry agreement between the corpus, the extraction
+store, and the graph:
+
+| State | Meaning | Effect |
+|---|---|---|
+| matched | entry describes a corpus paper | ok |
+| missing | corpus paper has no extraction | warning; graph will be partial |
+| stale / superseded | extraction no longer matches the corpus | **blocks** graph builds; prune then re-run |
+| graph missing/stale papers | graph disagrees with the corpus | rebuild via `rla run` |
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/test_p9_provider_routing.py -v
-.\.venv\Scripts\python.exe -m pytest tests/ -k fallback
+rla status            # read-only, no network, no model, no budget
+rla status --prune    # delete stale + superseded entries, then re-run `rla run`
+rla stats             # corpus + graph summary tables
 ```
 
-**Use the venv's tools, not the ones on `PATH`.** The system Python may lack `respx`
-(breaking test collection) and ships an older `ruff` that reports failures the pinned
-version does not.
+## Common errors
 
-Test files are named `test_p<N>_*.py` after the `PLAN.md` milestone they gate, not after
-the module under test.
+**Python / venv.**
 
----
+| Symptom | Cause / fix |
+|---|---|
+| `ModuleNotFoundError: No module named 'rla'` | `python -m src.rla.cli` never works (src-layout). Use the `rla` command. |
+| `test_p1_acquisition.py` fails to collect | system Python lacks `respx`. Use `.venv\Scripts\python.exe`. |
+| `ruff` reports `UP038` hits | system ruff is 0.1.14. Use the venv's pinned `ruff>=0.5`. |
 
-## Architecture
+**Ollama.**
+
+| Symptom | Cause / fix |
+|---|---|
+| connection refused | `ollama serve` is not running; check `RLA_OLLAMA_URL` (no `/v1`/`/api` suffix). |
+| structured stages refuse the model | over the LiteLLM `/v1` path the capability gate refuses local models; use native `ollama/…` ids instead. |
+| slow extraction (~90 s+/paper) | `ollama/…` routed through LiteLLM `/v1`; switch to native `ollama/…` (`/api/generate`). |
+| everything becomes duplicates | new embedding space is `UNCALIBRATED`; run `rla calibrate-merges` and commit a threshold. |
+
+**Gemini (incl. 404).**
+
+| Symptom | Cause / fix |
+|---|---|
+| 404 / `NOT_FOUND` | configured model retired/renamed/tier-gated — pick a current model in `.env`. `rla doctor --llm` hint: "model retired". |
+| 401 on every call | OAuth token instead of an AI Studio key. Replace `GEMINI_API_KEY`. |
+| `limit: 0` / `RESOURCE_EXHAUSTED` on Pro models | free tier has no quota there; use a flash-tier model. |
+| daily per-model allowance spent | per day, per model (~20 req/day). Use a model with quota left or wait; `RLA_FALLBACK_ON_QUOTA=true` opts into spending the reserve. |
+
+**Model resolution** (exact messages, `src/rla/errors.py` + `src/rla/config.py`):
 
 ```text
-Pipeline stages  →  LLMClient Protocol  →  ProviderRouter  →  ┬→ GeminiClient (native SDK)
-                                                          └→ LiteLLMBackend (optional)
+Ambiguous model id 'qwen3:4b': it names no known provider. Specify an explicit
+provider prefix, for example 'ollama/qwen3:4b' (or another supported provider/model id).
 ```
 
-Pipeline stages never import a provider SDK. `ProviderRouter` owns model selection,
-capability gating, and fallback; retry, rate limiting, budget, and SQLite caching stay in
-`rla.llm.retry` / `rla.store.cache` so there is exactly one retry layer.
+```text
+Unknown provider prefix 'foo' in model id 'foo/bar'. Known providers: anthropic,
+azure, bedrock, cohere, deepseek, gemini, groq, mistral, ollama, openai, openrouter, xai.
+```
 
-Sources, stores, and the evaluation harness are unchanged by the routing work.
+Fix: write the id as `provider/model`. These raise before any request; the router
+never retries or falls back on them.
 
-## Documentation
+**Embeddings.** Never reuse 0.92/0.70 across embedding spaces. Uncalibrated space
+→ auto-merge disabled (safe direction: visible duplicates, never fused lineage).
 
-| Document | What it covers |
+**Fallback.** Not firing on quota/auth/400s is by design (see previous section).
+A failure that "should have failed over" is usually a non-fallback-eligible
+category — check the category, not the retry count.
+
+**Integrity.** `rla ask` "no graph" / `rla eval` `FileNotFoundError` → fresh clone
+(no `data/graph/`); run `rla run` first. `rla status` red rows → prune + re-run.
+
+**TUI.** Garbled layout → legacy conhost; use Windows Terminal. `the TUI needs
+Textual` → `pip install -e ".[tui]"`.
+
+**Diagnosis workflow:** `rla doctor` → `rla doctor --llm` → `rla sources` →
+`rla status` → `rla run --jsonl` (inspect per-phase events) → narrow with the
+table above.
+
+## Troubleshooting decision flow
+
+```text
+rla doctor fails ─▶ venv installed? (.venv\Scripts\python.exe) ─▶ .env present?
+rla doctor --llm fails ─▶ 401? bad key ─▶ 404? retired model ─▶ quota? daily cap
+sources empty ─▶ rla sources: which index is down? (bot protection / rate limit)
+status red ─▶ stale/superseded? --prune + re-run ─▶ missing? re-run extracts them
+run stalls at extraction ─▶ quota spent (free tier ~20/day) or hung provider (120 s timeout)
+ask/eval "no graph" ─▶ rla run first (data/graph/ is gitignored)
+TUI broken ─▶ conhost? use Windows Terminal ─▶ Textual missing? install [tui]
+slow local inference ─▶ ollama/… via LiteLLM? switch to native ollama/… ids
+false lineage ─▶ over-merge; check embedding-space calibration (ADR-0007)
+```
+
+## Useful commands
+
+```powershell
+rla doctor --llm
+rla sources --probe "graph attention networks"
+rla build -t "Graph Attention Networks" --jsonl
+rla run -t "Graph Attention Networks" -q "How did GAT evolve?" --jsonl
+rla ask "How did GAT evolve?" --markdown
+rla report
+rla status
+rla stats
+rla events
+rla calibrate-merges
+rla eval
+rla tui -t "Graph Attention Networks" -q "How did GAT evolve?"
+```
+
+## Config reference
+
+`.env.example` is the documented contract — every variable is described there.
+Key settings (defaults in `src/rla/config.py`):
+
+| Variable | Default | Notes |
+|---|---|---|
+| `GEMINI_API_KEY` | (blank → degrade mode) | no `RLA_` prefix; AI Studio key |
+| `RLA_FAST_MODEL` | `gemini-2.5-flash-lite` | generic fallback; `doctor` probes |
+| `RLA_STRONG_MODEL` | `gemini-2.5-flash` | fallback for answer role |
+| `RLA_STRUCTURED_MODEL` | (empty → `fast_model`) | 4 schema-constrained stages |
+| `RLA_ANSWER_MODEL` | (empty → `strong_model`) | streamed answers |
+| `RLA_EMBEDDING_MODEL` | `gemini-embedding-001` | or `ollama/nomic-embed-text` |
+| `RLA_FALLBACK_MODELS` | `gemini-2.5-flash` | ordered, comma-separated |
+| `RLA_FALLBACK_ON_QUOTA` | `false` | opt into failover on daily quota |
+| `RLA_LLM_PROVIDER` | `gemini` | `gemini` \| `litellm` (needs `[router]` extra) |
+| `RLA_LLM_BASE_URLS` | (empty) | JSON map `{"provider": "url"}`; LiteLLM path only |
+| `RLA_STRUCTURED_OUTPUT_MODELS` | (empty) | operator assertion for LiteLLM-route local models |
+| `RLA_OLLAMA_URL` | `http://localhost:11434` | no `/v1`/`/api` suffix |
+| `RLA_OLLAMA_THINK` | `false` | reasoning-trace emission |
+| `RLA_LLM_RPM` / `RLA_LLM_MAX_RETRIES` | `15` / `5` | pacing is not the quota fix |
+| `RLA_LLM_DAILY_BUDGET` | `15` (`0` = uncapped) | local per-run, per-model cap |
+| `RLA_LLM_TIMEOUT_SECONDS` | `120` | per provider attempt |
+| `RLA_SERPAPI_API_KEY` | (blank → Scholar pass off) | recent-preprint coverage |
+| `RLA_TARGET_CORPUS_MIN` / `_MAX` | `40` / `100` | corpus bounds |
+
+## Development and testing
+
+```powershell
+python -m pytest tests/ -q                          # 668 passed
+python -m pytest tests/test_p8_gap_validity.py -v    # one module
+python -m ruff check src/                            # line-length 100, select E,F,I,UP,B
+```
+
+`pyproject.toml` sets `asyncio_mode = "auto"` — no `@pytest.mark.asyncio`
+markers. Test modules are named `test_p<N>_*.py` after the `PLAN.md` milestone
+they gate. Tests redirect all paths to `tmp_path` and never touch `data/`.
+
+## Documentation map
+
+| Document | Covers |
 |---|---|
-| [`AGENTS.md`](AGENTS.md) | Conventions and gotchas for coding agents |
-| [`docs/OPERATIONS_GUIDE.md`](docs/OPERATIONS_GUIDE.md) | **Start here.** Every way to run the pipeline, how model routing works, every limit and how to change it |
-| [`docs/demo_commands.md`](docs/demo_commands.md) | Command-by-command manual checks with expected output |
-| [`docs/llm_architecture_audit.md`](docs/llm_architecture_audit.md) | Audit of the LLM layer before the migration |
-| [`docs/llm_provider_migration_plan.md`](docs/llm_provider_migration_plan.md) | Migration design, ADRs, rollback |
-| [`docs/llm_provider_validation.md`](docs/llm_provider_validation.md) | Real-provider validation results |
-| [`PLAN.md`](PLAN.md) | Milestones P0-P9 and their acceptance gates |
-
-## Known limitations
-
-- **The Gemini free tier cannot complete a full run.** ~20 requests/model/day against
-  ~100 extraction calls for a 100-paper corpus. A paid key is needed for the full
-  pipeline; the free tier works for single commands and development.
-- **`rla eval` reports `NOT MEASURED` for extraction accuracy** because the shipped
-  reference set is not hand-labelled. The harness refuses to invent the number.
-- **Only Gemini has been validated through the routing layer.** No second provider is
-  configured.
-- **Textual needs Windows Terminal**, not legacy conhost.
+| `docs/OPERATIONS_GUIDE.md` | full operations reference this README summarizes |
+| `docs/adr/0006-multi-provider-dispatch.md` | MultiBackend dispatch design |
+| `docs/adr/0007-per-embedding-model-merge-thresholds.md` | per-embedding-space merge thresholds |
+| `docs/adr/` | all architecture decisions behind the LLM layer |
+| `docs/demo_commands.md` | command-by-command manual checks with expected output |
+| `docs/env_loading.md` | how `.env` is found and resolved |
+| `PLAN.md` | milestones and acceptance gates |
+| `AGENTS.md` | conventions and gotchas for coding agents |
 
 ## License
 
-See repository history. `research-literature-agent-project-final.md` is the read-only
-original specification.
+See repository history. `research-literature-agent-project-final.md` is the
+read-only original specification.
