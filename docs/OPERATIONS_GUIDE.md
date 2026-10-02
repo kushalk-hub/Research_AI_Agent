@@ -14,7 +14,7 @@ Companion documents:
 | [`llm_provider_migration_plan.md`](llm_provider_migration_plan.md) | why the routing layer exists |
 | [`adr/`](adr/) | the seven decisions behind the LLM layer |
 
-Verified against the working tree on 2026-10-01.
+Verified against the working tree on 2026-10-02.
 
 ---
 
@@ -73,19 +73,22 @@ event stream.
 
 ### 2.1 CLI
 
-Ten commands. `rla --help` lists them; `rla events` prints the phase order.
+Twelve commands. `rla --help` lists them; `rla events` prints the phase order.
+Verified against `src/rla/cli.py` (README "CLI reference" is the short form).
 
 ```powershell
-rla doctor [--llm]                        # config, sources, cache; --llm probes models live
-rla sources [--probe "query"] [--cache]    # is each source actually answering right now?
+rla doctor [--llm/--no-llm]              # config, sources, cache; --llm probes models live
+rla sources [--probe "query"] [--cache/--no-cache]  # is each source actually answering right now?
 rla stats                                  # corpus + graph summary tables
 rla events                                 # the 10 phases, in order
-rla build  -t "Topic" [--jsonl]            # acquisition only
-rla run    -t "Topic" [-q "Q"] [--jsonl]  # full pipeline, streaming events
+rla build  -t "Topic" [--jsonl] [--structured-model M] [--answer-model M]  # acquisition only
+rla run    -t "Topic" [-q "Q"] [--jsonl] [--structured-model M] [--answer-model M]  # full pipeline
 rla ask     "Q" [--markdown] [--jsonl]    # answer from the built graph
-rla report  [--markdown/--no-markdown] [--jsonl]   # limitations + synthesized gaps
+rla report  [--markdown] [--jsonl]        # limitations + synthesized gaps
+rla status [--prune]                       # corpus/store/graph agreement; --prune deletes stale+superseded
+rla calibrate-merges                       # PROPOSE (never install) a merge threshold for the embedder
 rla eval                                   # evaluation report
-rla tui    -t "Topic" [-q "Q"]             # live terminal UI
+rla tui    -t "Topic" [-q "Q"] [--structured-model M] [--answer-model M]  # live terminal UI
 ```
 
 Notes that save time:
@@ -139,7 +142,21 @@ What is on screen:
 | tree | `rich.tree.Tree` | the traversal, built from the reducer's `TreeNode` |
 | answer | streamed | grows as `delta` events land, with the cited labels appended |
 
-Keys: `q` quit, `c` clear log.
+Keys (verified against `src/rla/tui/app.py` `BINDINGS` and `HELP_TEXT`):
+
+| Key | Action |
+|---|---|
+| `q` | quit |
+| `c` | clear log |
+| `m` | toggle model selector (session only, never saved to `.env`) |
+| `e` | cycle structured-role model |
+| `a` | cycle answer-role model |
+| `x` | clear session overrides |
+| `?` | help overlay |
+
+Cycling steps through `[none, *available_models]` (the two role models plus
+configured fallbacks, de-duplicated); it sets a transient session override on
+the router — the top rung of the §3.3 precedence chain.
 
 The pipeline runs in a Textual worker on the event loop. Each event is a cheap `update()` on
 already-mounted widgets, so a slow network stage cannot freeze the render loop; a crash inside a
@@ -258,6 +275,30 @@ store and the graph, and compares two retrieval arms. It costs no LLM requests i
 arms. `eval/run_eval.py` is importable — `run_eval(settings)` returns a report object with
 `to_dict()`, and `render_table(report)` produces the Markdown.
 
+### 2.7 Status and integrity states
+
+`rla status` is read-only unless `--prune`. It costs nothing: no network, no
+model, no LLM budget. It reports per-entry agreement between the corpus, the
+extraction store, and the graph (`store/extraction_store.py:reconcile`):
+
+| State | Meaning | Effect |
+|---|---|---|
+| matched | entry describes a corpus paper | ok |
+| missing | corpus paper has no extraction | **warning** — the graph builds anyway, but partial (`build_graph_stage` emits a `warn` naming the count) |
+| stale | entry belongs to a different corpus | **blocks** graph builds — `build_graph_stage` refuses rather than mixing corpora |
+| superseded | entry's paper is in the corpus but its content changed since extraction | **blocks** graph builds, same as stale |
+| graph missing papers | corpus papers absent from the on-disk graph | warning — rebuild via `rla run` |
+| graph stale papers | graph contains papers not in the corpus | the graph is from an older build — re-run `rla run` |
+
+```powershell
+rla status            # read-only
+rla status --prune    # delete stale + superseded entries (labels: paper id, or id@hash for superseded), then re-run `rla run`
+```
+
+`--prune` deletes and rewrites the store; a no-op prune skips the rewrite.
+`rla ask` "no graph" and `rla eval` `FileNotFoundError` are the same root cause
+one step later: `data/graph/` is gitignored, so a fresh clone has no graph.
+
 ---
 
 ## 3. Model routing
@@ -295,12 +336,17 @@ One env var. No code change.
 ```dotenv
 RLA_LLM_PROVIDER=gemini     # default: native Google SDK, 7 runtime deps
 RLA_LLM_PROVIDER=litellm    # route through LiteLLM (pip install -e ".[router]")
+RLA_LLM_PROVIDER=ollama     # native Ollama backend
 ```
+
+The value is validated when the backend stack is built (`src/rla/llm/factory.py:BACKENDS`) and
+is the default for provider-agnostic model ids; `provider/model` ids dispatch by their prefix
+regardless (§3.1).
 
 An unrecognised value is a **configuration error, not a silent default**:
 
 ```text
-ValueError: unknown RLA_LLM_PROVIDER 'nonsense'; expected one of gemini, litellm
+ValueError: unknown RLA_LLM_PROVIDER 'nonsense'; expected one of gemini, litellm, ollama
 ```
 
 LiteLLM is imported *inside a function* in `litellm_backend.py`, so the default install never loads
@@ -335,7 +381,7 @@ resolves in this order, highest first:
 | `RLA_STRUCTURED_MODEL` | the schema-constrained stages | *empty* → `fast_model` | unset |
 | `RLA_ANSWER_MODEL` | streamed answer generation | *empty* → `strong_model` | unset |
 | `RLA_EMBEDDING_MODEL` | concept embeddings | `gemini-embedding-001` | as default |
-| `RLA_FALLBACK_MODELS` | ordered fallback chain, comma-separated | `gemini-2.5-flash` | `ling-3.0-flash-sante:free` |
+| `RLA_FALLBACK_MODELS` | ordered fallback chain, comma-separated | `gemini-2.5-flash` | as default |
 
 **An empty role setting means "inherit", not "use nothing".** That is why `structured_model`
 defaults to `""` and not to `strong_model`: the structured stages are the bulk of the request
@@ -462,6 +508,13 @@ stage's model via RLA_STRUCTURED_MODEL / RLA_ANSWER_MODEL.
 models would splice two different answers together. If the primary fails before the first chunk the
 error propagates and the stage's own degradation handles it.
 
+**Fallback is not retry.** Retry (`RLA_LLM_MAX_RETRIES`, default 5, `llm/retry.py`)
+re-attempts the *same* model for retryable categories; fallback moves to the
+*next* model in the chain. Do not raise either retry knob to fix a quota, auth,
+or 400/404 failure — those categories are terminal by design. (`RLA_MAX_RETRIES`,
+default 4, is the unrelated retry count for academic-source HTTP, not provider
+calls.)
+
 ### 3.7 Cache, pacing, budget
 
 - **Cache first, always.** Every LLM call is keyed on model + prompt hash + schema. A hit makes
@@ -475,7 +528,7 @@ error propagates and the stage's own degradation handles it.
   `GenerateRequestsPerDayPerProjectPerModel-FreeTier` — because a real captured per-day 429 carries
   both the quota id *and* a "retry in Ns" hint, and trusting the hint turns every daily-cap failure
   into three pointless retries before the same terminal error.
-- **Per-run budget.** `RLA_LLM_DAILY_BUDGET` (default 15, here 200) is a **local** cap on requests
+- **Per-run budget.** `RLA_LLM_DAILY_BUDGET` (default 15) is a **local** cap on requests
   per model per run. It exists so a large batch cannot spend the whole day's allowance on its first
   pass and leave nothing for resolution, graph building or answering. Set `0` for no cap. The
   spender is reset at the start of every `Pipeline.run()`, because it is a process-global singleton
@@ -504,7 +557,7 @@ Two kinds of knob: **configuration** (env var → `.env`, no code change) and **
 | `OPENAI_API_KEY` | `""` | — | Credential for a **second provider**. Named for the provider, not the routing role: a provider can be promoted to primary later, at which point `FALLBACK_API_KEY` would be actively misleading | You want cross-provider failover |
 | `RLA_LLM_PROVIDER` | `gemini` | `gemini` \| `litellm` | Which backend serves every call | Switching providers |
 | `RLA_FAST_MODEL` | `gemini-2.5-flash-lite` | — | Generic fallback; also what `doctor` probes | A tier change |
-| `RLA_STRONG_MODEL` | `gemini-2.5-flash` | — | Fallback for the answer model. **Also what extraction and resolution actually use** (§3.4) | Cost control on a free key |
+| `RLA_STRONG_MODEL` | `gemini-2.5-flash` | — | Fallback for `RLA_ANSWER_MODEL`. Extraction and resolution use `RLA_STRUCTURED_MODEL` → `RLA_FAST_MODEL` instead (§3.4) | Cost control on a free key |
 | `RLA_STRUCTURED_MODEL` | `""` → `fast_model` | — | Model for the schema-constrained stages. See §3.4 for what really honours it | Balancing cost vs extraction quality |
 | `RLA_ANSWER_MODEL` | `""` → `strong_model` | — | Streamed answer generation, where quality is user-visible and volume is one call per question | Answer quality matters more than cents |
 | `RLA_EMBEDDING_MODEL` | `gemini-embedding-001` | — | Concept embeddings. Cache keys are model-aware, so changing it invalidates stored vectors | `text-embedding-004` is retired and 404s; this is the GA replacement |
@@ -530,6 +583,7 @@ Two kinds of knob: **configuration** (env var → `.env`, no code change) and **
 | `RLA_GROBID_URL` | `""` | — | Reserved. No adapter exists | Phase 2 |
 | `RLA_NEO4J_URI` / `_USER` / `_PASSWORD` | localhost / `neo4j` / `""` | — | Reserved. No consumer exists | When a server is available |
 | `RLA_LOG_LEVEL` | `INFO` | — | **Currently unused.** The setting is declared in `config.py` but nothing reads it; `config.py` deliberately sets up no logging because it is imported by `rla doctor --help` | Not yet — use an event-level filter or wire it up |
+| `RLA_DATA_DIR` / `RLA_RAW_DIR` / `RLA_GRAPH_DIR` | `data/` · `data/raw/` · `data/graph/` | — | Output locations, resolved from the repo root, not the CWD. Uncomment only to redirect output | Moving `data/` off the repo disk |
 
 Every field is validated by pydantic with explicit bounds (`ge`/`le`), so an out-of-range value
 fails at startup with a message naming the field, rather than producing a strange rate later.
@@ -570,7 +624,23 @@ fails at startup with a message naming the field, rather than producing a strang
 | `_PERIOD_QUOTA_MARKERS` | 6 markers | `llm/error_map.py` | Distinguishes a daily cap from a burst 429 | Add a marker if the provider renames its quota id |
 | `_RETRYABLE` / `_FALLBACK_ELIGIBLE` | 4 categories each | `llm/errors.py` | **The** error policy. Derived from the category, never re-decided per call site | Extend deliberately, and extend the tests |
 
-### 4.3 Changing something safely
+### 4.3 Per-embedding-space thresholds (uncalibrated-safe behaviour)
+
+Merge thresholds belong to the embedding *space*, not to the pipeline:
+`resolve.thresholds_for(canonical_model_id)` returns the calibrated pair only
+for `gemini/gemini-embedding-001` (auto-merge 0.92 / judge-band floor 0.70).
+Every other space starts `UNCALIBRATED`: automatic merging is **disabled**
+(`auto=None`, fail toward duplicates, never toward false lineage) and borderline
+pairs go to the bounded judge (`MAX_JUDGE_CALLS=40`). `rla calibrate-merges`
+**proposes** a threshold from the similarity distribution at a 2% false-merge
+budget; a human commits it. It installs nothing. Never reuse 0.92/0.70 for a
+space that was not calibrated to them — including `ollama/nomic-embed-text`.
+
+Changing `RLA_EMBEDDING_MODEL` starts a new space: stored vectors are keyed by
+model id, so old similarities do not silently carry over, but the new space
+still needs calibration before auto-merge is trustworthy.
+
+### 4.4 Changing something safely
 
 1. **Configuration first.** Anything with a `RLA_` prefix is meant to be changed without code.
    Add new keys to `.env.example` when you add settings — that file is the documented contract.
@@ -585,6 +655,22 @@ fails at startup with a message naming the field, rather than producing a strang
 ---
 
 ## 5. Recipes
+
+### Supported modes
+
+Three configurations are supported by the code. README "Supported modes" is the entry-point
+version; the recipes below are the detail:
+
+| Mode | Text models | Embedding model | Needs `GEMINI_API_KEY`? |
+|---|---|---|---|
+| Fully local | `ollama/…` in every role | `ollama/nomic-embed-text` (768 dims) | No |
+| Hybrid | `ollama/…` for text roles | Gemini embedder | Yes — embeddings still go through Gemini |
+| Cloud / fallback | Gemini (native), or a second provider via the LiteLLM `[router]` extra | `gemini-embedding-001` | Yes |
+
+Mode is not a setting — it is which model ids sit in which role (§3.3), so mixed configurations
+(`ollama/…` structured + a Gemini answer model, say) are just configuration. Blank
+`GEMINI_API_KEY` + no usable `ollama/…` role ⇒ keyless degrade mode: acquisition works, LLM
+stages are skipped.
 
 ### Why a run stops at "daily free-tier quota exhausted"
 
@@ -621,7 +707,7 @@ with whatever the sources returned.
 20. A 30-paper corpus therefore needs **2 days** on one Gemini model, however well the code behaves.
 That is arithmetic, not a bug.
 
-**Three defects fixed, each with a test:**
+**Three further defects fixed, each with a test:**
 
 1. **The quota category was lost between the retry layer and the router.** `call_with_retry`
    recognised the daily cap, then re-raised its own *text-only* message. A bare `LLMError`
@@ -680,9 +766,11 @@ RLA_LLM_DAILY_BUDGET=0
 
 Two things to know:
 
-- **Keep `GEMINI_API_KEY` set** even if every text call is local. `build_client` returns `None`
-  without it, and the pipeline would degrade — and Gemini is still the only wired *embedder*, so
-  entity resolution needs it regardless.
+- **Keep `GEMINI_API_KEY` set** for this recipe: `build_client` returns `None` without it — on the
+  LiteLLM route a non-`ollama` model counts as usable only while the Gemini key is present
+  (`factory._has_usable_provider`), so a blank key degrades the pipeline even though every text
+  call would go to your local server. Embeddings are a separate setting:
+  `RLA_EMBEDDING_MODEL=ollama/nomic-embed-text` needs no key at all (fully-local recipe below).
 - **Verify with `rla doctor --llm`** after switching. It probes the configured backend, so a green
   answer means the local path really served the request.
 
@@ -720,15 +808,19 @@ Notes:
   removes compatibility/prefill overhead (~4096 vs ~662 prompt tokens), not
   intrinsic token-generation speed.
 
-### Fresh clone → a cited answer
+### Fresh laptop → a verified, cited answer
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev,tui]"
-Copy-Item .env.example .env          # then paste GEMINI_API_KEY
-rla doctor --llm                     # green means a request went out *now*
-rla sources                          # which indexes answer today
+Copy-Item .env.example .env          # then paste GEMINI_API_KEY (or configure fully-local Ollama roles)
+rla doctor                           # config, sources, cache -- no key needed
+rla doctor --llm                     # green means a request went out *now* (live, uncached, spends requests)
+rla sources                          # which indexes answer today (bypasses cache by default)
 rla run -t "Graph Attention Networks" -q "How did GAT evolve?"
+rla status                           # matched/missing/stale/superseded -- prune + re-run if red
+rla ask "How did GAT evolve?" --markdown
+rla report                           # keyless; every claim traces to a stored extraction
 ```
 
 `python -m src.rla.cli` does **not** work — src layout, import name `rla`. If you have not installed,
@@ -752,16 +844,21 @@ rla run -t "Graph Attention Networks" --jsonl |
 Fix it, cheapest first:
 
 ```powershell
-# 1. Point the project at the corpus the store belongs to, if you still have it
-#    (extraction resume is content-hash keyed, so matching papers cost nothing)
+# 0. Prefer the built-in check: it names the stale/superseded entries and
+#    deletes exactly those, so re-extraction is content-hash resumable.
+rla status
+rla status --prune
+rla run -t "<topic>"            # SCORE -> EXTRACT -> RESOLVE -> GRAPH
+```
 
-# 2. Or archive the store and re-extract. Extraction resumes by content hash,
-#    so re-running never re-calls the model for a paper already stored.
+```powershell
+# Manual alternative: archive the store and re-extract. Extraction resumes by
+# content hash, so re-running never re-calls the model for a paper already stored.
 Move-Item data\extractions.jsonl data\extractions.jsonl.bak
 Move-Item data\concepts.json   data\concepts.json.bak
 rla run -t "<topic>"            # SCORE -> EXTRACT -> RESOLVE -> GRAPH
 
-# 3. Verify
+# Verify
 rla stats                        # nodes_Paper should equal the corpus; look for edges_INTRODUCES
 ```
 
@@ -827,15 +924,42 @@ request goes out**.
 | `the TUI needs Textual` | The `tui` extra is optional: `pip install -e ".[tui]"`. |
 | `rla ask` says "no graph at …" | `data/graph/` is gitignored. Run `rla run -t "<topic>"` first. |
 | `rla eval` crashes with `FileNotFoundError` | Same cause. |
+| `refusing to build a graph: N stored extraction(s) belong to a different corpus` | Stale/superseded entries block the build. `rla status --prune`, then re-run. |
+| `N corpus paper(s) have no extraction; building a partial graph` | Missing entries warn, not block. Re-run `rla run` to extract them. |
+| `looks like an OAuth token, not an AI Studio key` (`doctor --llm` hint) | `GEMINI_API_KEY` holds `gcloud` output, not an AI Studio key. Replace it. |
+| `model retired; pick a current one in .env` (`doctor --llm` hint) | 404: the configured model was retired, renamed, or tier-gated. |
+| `free tier has no quota for this model; use a flash-tier model` (`doctor --llm` hint) | `limit: 0` on a Pro model: the free tier has no quota there. |
+| `the daily per-model allowance is spent; use a model with quota left` (`doctor --llm` hint) | Per-day, per-model cap (~20 req/day). Wait, switch roles, or opt into `RLA_FALLBACK_ON_QUOTA=1`. |
+| fallback did not fire on quota/auth/400s | By design (§3.6). Quota fails over only with `RLA_FALLBACK_ON_QUOTA=1`; auth/invalid-request/unsupported never do. A "should have failed over" case is usually a non-eligible category — check the category, not the retry count. |
+| `Ambiguous model id` / `Unknown provider prefix` | Write the id as `provider/model` (`ollama/qwen3:4b`). Raised before any request; never retried or fallen back on. |
+| everything becomes duplicates after switching embedders | New space is `UNCALIBRATED`: auto-merge disabled by design. `rla calibrate-merges`, commit a threshold. |
+| `cannot compare vectors of different dimensions: A vs B` | `RLA_EMBEDDING_MODEL` changed between calls; the cosine check raises rather than scoring 0.0. Re-embed (fresh space) before comparing. |
+| slow extraction (~90 s+/paper) on a local model | `ollama/…` routed through LiteLLM `/v1` instead of native `/api/generate`. Use native `ollama/…` ids. |
+| `OllamaBackend` connection refused / model-not-found | `ollama serve` is not running, `RLA_OLLAMA_URL` has a `/v1` or `/api` suffix, or the model was never pulled (`ollama pull`). |
 | Tests fail with odd model/provider names | Tests pin their own routing config so the developer's `.env` cannot leak into them. |
 | System Python fails to collect `test_p1_acquisition.py` | `respx` is missing there. Use `.\.venv\Scripts\python.exe`. |
+
+### Diagnosis decision flow
+
+```text
+rla doctor fails ──────────▶ venv installed? (.\.venv\Scripts\python.exe) ─▶ .env present?
+rla doctor --llm fails ────▶ 401? bad key (OAuth, not AI Studio) ─▶ 404? retired model ─▶ quota? daily cap spent
+sources empty ─────────────▶ rla sources: which index is down? (bot protection / rate limit)
+rla status red ────────────▶ stale/superseded? --prune + re-run ─▶ missing? re-run extracts them
+run stalls at extraction ──▶ quota spent (free tier ~20/day) or hung provider (120 s timeout, then retry/fallback)
+ask/eval "no graph" ───────▶ rla run first (data/graph/ is gitignored)
+TUI broken ────────────────▶ conhost? use Windows Terminal ─▶ Textual missing? install [tui]
+slow local inference ──────▶ ollama/… via LiteLLM /v1? switch to native ollama/… ids
+false lineage ─────────────▶ over-merge; check embedding-space calibration (§4.3, ADR-0007)
+fallback never fires ──────▶ check the error category: quota needs RLA_FALLBACK_ON_QUOTA=1, auth/400s never fail over
+```
 
 ---
 
 ## 7. Development
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -q              # 529 passed in ~68s
+.\.venv\Scripts\python.exe -m pytest tests/ -q              # 668 passed
 .\.venv\Scripts\python.exe -m ruff check src/ tests/        # All checks passed
 .\.venv\Scripts\python.exe -m pytest tests/test_p9_provider_routing.py -v
 .\.venv\Scripts\python.exe -m pytest tests/ -k fallback
