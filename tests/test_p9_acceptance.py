@@ -137,19 +137,49 @@ def test_a1_the_orchestrator_constructs_nothing_provider_specific():
 
 
 def test_a8_selecting_a_provider_is_configuration_only(tmp_path):
-    """A8: change the provider, change no code."""
+    """A8: change the provider, change no code.
+
+    The old assertion checked that `build_backend` returned `GeminiClient`, which
+    tests an implementation class rather than the contract. Now that
+    `MultiBackend` is the stable facade, the guarantee worth keeping is that
+    provider selection is configuration- and model-driven: each model id reaches
+    the backend that owns it, and a nonsense provider is a configuration error
+    rather than a silent default.
+    """
+    from rla.llm.factory import build_backend
+
     settings = Settings(
+        _env_file=None,
         gemini_api_key="k",
         data_dir=tmp_path,
         raw_dir=tmp_path / "raw",
         graph_dir=tmp_path / "graph",
     )
-    assert isinstance(build_backend(settings), GeminiClient)
-
-    settings.llm_provider = "litellm"
     backend = build_backend(settings)
-    assert backend.name == "litellm"
-    assert not isinstance(backend, GeminiClient)
+
+    assert backend.name == "multi"
+    assert backend.backend_for("gemini/gemini-2.5-flash").name == "gemini"
+    assert backend.backend_for("ollama/qwen3:4b").name == "ollama"
+    assert backend.backend_for("openrouter/ling-3.0-flash-sante:free").name == "litellm"
+
+
+def test_a8_provider_agnostic_ids_follow_the_configured_default(tmp_path):
+    """`RLA_LLM_PROVIDER` remains the default for an id that names no provider."""
+    from rla.llm.factory import build_backend
+
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="k",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+        llm_provider="ollama",
+    )
+    assert build_backend(settings).provider_for("gemini-2.5-flash") == "gemini"
+
+    settings.llm_provider = "nonsense"
+    with pytest.raises(ValueError, match="RLA_LLM_PROVIDER"):
+        build_backend(settings)
 
 
 def test_an_unknown_provider_is_a_configuration_error_not_a_silent_default(tmp_path):

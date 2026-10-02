@@ -779,3 +779,131 @@ def test_the_observer_cannot_change_the_fallback_decision(tmp_path):
 
     text = asyncio.run(router.generate_text("x", stage="extraction"))
     assert text == "text from gemini-2.5-flash"
+
+
+# ---------------------------------------------------------------------------
+# P12: one run, three providers
+# ---------------------------------------------------------------------------
+
+
+class RecordingBackend(FakeBackend):
+    """Fake backend that records the provider prefix it was asked to serve."""
+
+    def __init__(self, name: str, **kw):
+        super().__init__(**kw)
+        self.name = name
+
+    def supports(self, model, capability):
+        if capability == "supports_structured_output":
+            return self.structured.get(model, True)
+        return False
+
+
+def _multi(tmp_path, backend, **kw):
+    from rla.llm.multi import MultiBackend
+
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="k",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+        **kw,
+    )
+    return MultiBackend(settings, None, None), backend
+
+
+async def test_one_run_uses_three_providers_and_a_cross_provider_fallback(tmp_path):
+    """The headline guarantee: Ollama for the bulk, Gemini for answers,
+    OpenRouter as the external fallback -- all in a single run."""
+    from rla.llm.router import ProviderRouter
+
+    backend = RecordingBackend("fake")
+    multi, backend = _multi(tmp_path, backend)
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="k",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+        structured_model="ollama/qwen3:4b",
+        answer_model="gemini/gemini-2.5-flash",
+        fallback_models="openrouter/backup:free,ollama/second:4b",
+    )
+    router = ProviderRouter(backend, settings)
+
+    # structured stages go to the configured role model
+    await router.generate_structured("x", Out, stage="extraction")
+    assert backend.calls[-1] == ("extraction", "ollama/qwen3:4b")
+
+    # answers go to a different provider
+    await router.generate_text("x", stage="answer")
+    assert backend.calls[-1] == ("answer", "gemini/gemini-2.5-flash")
+
+
+async def test_a_fault_on_one_provider_fails_over_to_another(tmp_path):
+    from rla.llm.router import ProviderRouter
+
+    backend = RecordingBackend("fake", fail={"ollama/qwen3:4b": ProviderServerError("503")})
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="k",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+        structured_model="ollama/qwen3:4b",
+        fallback_models="openrouter/backup:free",
+    )
+    router = ProviderRouter(backend, settings)
+
+    text = await router.generate_text("x", stage="extraction")
+
+    assert text == "text from openrouter/backup:free"
+    assert [m for _, m in backend.calls] == ["ollama/qwen3:4b", "openrouter/backup:free"]
+
+
+async def test_quota_on_one_provider_does_not_fail_over_by_default(tmp_path):
+    """ADR-004 survives the multi-provider change: falling over on a spent cap
+    spends the reserve the operator wanted kept."""
+    from rla.llm.router import ProviderRouter
+
+    backend = RecordingBackend(
+        "fake", fail={"ollama/qwen3:4b": ProviderQuotaExhausted("daily")}
+    )
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="k",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+        structured_model="ollama/qwen3:4b",
+        fallback_models="openrouter/backup:free",
+        fallback_on_quota=False,
+    )
+    router = ProviderRouter(backend, settings)
+
+    with pytest.raises(ProviderQuotaExhausted):
+        await router.generate_text("x", stage="extraction")
+    assert not router.fallbacks
+
+
+async def test_quota_failover_still_requires_the_opt_in(tmp_path):
+    from rla.llm.router import ProviderRouter
+
+    backend = RecordingBackend(
+        "fake", fail={"ollama/qwen3:4b": ProviderQuotaExhausted("daily")}
+    )
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="k",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+        structured_model="ollama/qwen3:4b",
+        fallback_models="openrouter/backup:free",
+        fallback_on_quota=True,
+    )
+    router = ProviderRouter(backend, settings)
+
+    assert await router.generate_text("x", stage="extraction") == "text from openrouter/backup:free"
+    assert router.fallbacks
