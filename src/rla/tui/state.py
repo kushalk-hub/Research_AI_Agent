@@ -25,6 +25,25 @@ from rla.events import PIPELINE_PHASES, Event, Phase
 #: orchestrator announces it as a phase-2 placeholder and `rla events` lists it.
 STATUS_PHASES: tuple[Phase, ...] = tuple(p for p in PIPELINE_PHASES if p is not Phase.ERROR)
 
+#: Stage name -> routing role. Only `structured` (query expansion, relevance
+#: scoring, extraction, resolution) and `answer` carry a role; every other
+#: stage is unmapped and reads no override. Both `Phase` values (`extract`)
+#: and descriptive names (`extraction`) map, because callers use both.
+_STAGE_ROLES = {
+    "search": "structured",
+    "query_expansion": "structured",
+    "query-expansion": "structured",
+    "score": "structured",
+    "scoring": "structured",
+    "relevance_scoring": "structured",
+    "relevance-scoring": "structured",
+    "extract": "structured",
+    "extraction": "structured",
+    "resolve": "structured",
+    "resolution": "structured",
+    "answer": "answer",
+}
+
 #: Per-log-line colour, keyed by event kind. `delta` is excluded on purpose:
 #: streamed answer text is not a log line, it belongs in the answer panel.
 LOG_STYLE = {
@@ -98,6 +117,14 @@ class PipelineState:
     error: str = ""
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
+    #: Configured role -> canonical model. Never mutated by a selection.
+    role_models: dict[str, str] = field(default_factory=dict)
+    #: Transient session selections, role -> canonical model. Distinct from
+    #: `role_models` so the panel can show configured vs override vs resolved,
+    #: which is what makes the routing auditable at a glance.
+    overrides: dict[str, str] = field(default_factory=dict)
+    #: `(stage, from, to, reason)` for each fallback observed, newest last.
+    fallbacks: list[tuple[str, str, str, str]] = field(default_factory=list)
 
     # -- folding ------------------------------------------------------------
 
@@ -262,7 +289,17 @@ class PipelineState:
         if width and len(full) + 5 + len(clock) > width:
             if len(compact) + 2 + len(clock) <= width:
                 return f"{compact}  {clock}"
-            return compact
+            if len(compact) <= width:
+                return compact
+            # Very narrow terminal: name the current phase only, so the strip
+            # degrades to `>ans  12s` instead of overflowing its single row
+            # and clipping mid-phase.
+            abbrev = _abbreviate(str(self.phase)) if self.phase is not None else "-"
+            minimal = f"{_MARKERS['active']}{abbrev}  {clock}"
+            if len(minimal) <= width:
+                return minimal
+            short = f"{_MARKERS['active']}{abbrev}"
+            return short[:width] if len(short) > width else short
         return f"{full}   |   {clock}"
 
     #: Counters worth the scarce space on one line, most important first. The
@@ -312,6 +349,51 @@ class PipelineState:
 
     def counter_summary(self) -> dict[str, int]:
         return dict(self.counters)
+
+    # -- routing visibility -------------------------------------------------
+
+    def select_model(self, role: str, model: str | None) -> None:
+        """Set or clear a transient session selection for a role.
+
+        Session-scoped by construction: this state is never written back to
+        settings or `.env`, so a demonstration choice cannot become permanent
+        configuration.
+        """
+        if model is None:
+            self.overrides.pop(role, None)
+        else:
+            self.overrides[role] = model
+
+    def resolved_role(self, stage: str | Phase) -> str:
+        """The model that would serve `stage` right now, override included.
+
+        Unmapped stages (anything outside the `structured` / `answer` roles)
+        read no override and resolve to the empty string.
+        """
+        role = _STAGE_ROLES.get(str(stage).lower())
+        if role is None:
+            return ""
+        return self.overrides.get(role) or self.role_models.get(role, "")
+
+    def record_fallback(self, stage: str, src: str, dst: str, reason: str) -> None:
+        self.fallbacks.append((stage, src, dst, str(reason)))
+
+    def routing_line(self) -> str:
+        """One compact line naming every role's configured, override and resolved
+        model, plus the most recent fallback."""
+        parts: list[str] = []
+        for role in ("structured", "answer"):
+            configured = self.role_models.get(role, "-")
+            override = self.overrides.get(role)
+            resolved = self.overrides.get(role) or configured
+            shown = f"{role}={resolved}"
+            if override and override != configured:
+                shown += f" (override; configured {configured})"
+            parts.append(shown)
+        if self.fallbacks:
+            stage, src, dst, reason = self.fallbacks[-1]
+            parts.append(f"fallback[{stage}]: {src} -> {dst} ({reason})")
+        return "  ".join(parts)
 
     def tree(self) -> TreeNode | None:
         """The traversed subgraph as a tree, rooted at the seed concepts.
