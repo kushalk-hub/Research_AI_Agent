@@ -235,7 +235,7 @@ def _similar_pairs(
     for i in range(len(vectors)):
         for j in range(i + 1, len(vectors)):
             score = cosine(vectors[i], vectors[j])
-            if score >= MAYBE_MERGE:
+            if score >= floor:
                 pairs.append((score, i, j))
     pairs.sort(key=lambda item: (-item[0], item[1], item[2]))
     return pairs
