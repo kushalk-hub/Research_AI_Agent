@@ -234,9 +234,13 @@ def test_tui_runs_when_the_tui_side_has_no_routing_names(runner, monkeypatch, se
     proving the wiring degrades instead of raising TypeError/AttributeError.
     """
     import rla.cli as cli
+    import rla.tui as tui_pkg
     import rla.tui.app as tui_app
 
-    assert not hasattr(tui_app, "connect_router"), "test needs the pre-C `rla.tui.app`"
+    # Simulate the pre-C `rla.tui.app`: the integrated tree HAS `connect_router`,
+    # so hide it for this test and exercise the CLI's getattr-based degrade path.
+    monkeypatch.delattr(tui_pkg, "connect_router", raising=False)
+    monkeypatch.delattr(tui_app, "connect_router", raising=False)
 
     router = FakeRouter()
     monkeypatch.setattr(
