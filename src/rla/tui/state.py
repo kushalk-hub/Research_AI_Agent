@@ -267,7 +267,7 @@ class PipelineState:
             # Very narrow terminal: name the current phase only, so the strip
             # degrades to `>ans  12s` instead of overflowing its single row
             # and clipping mid-phase.
-            abbrev = _abbreviate(str(self.phase)) if self.phase is not None else "—"
+            abbrev = _abbreviate(str(self.phase)) if self.phase is not None else "-"
             minimal = f"{_MARKERS['active']}{abbrev}  {clock}"
             if len(minimal) <= width:
                 return minimal

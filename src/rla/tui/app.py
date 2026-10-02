@@ -110,9 +110,9 @@ class GraphCounters(_StateView):
 #: interfaces (`set_override`, `role_models`/`resolved_role`, `on_fallback`)
 #: and is deliberately not built yet.
 HELP_TEXT = (
-    "keys: q quit · c clear log · ? this help\n"
-    "panels: status (phase + clock) · counters · log (wraps, no deltas)"
-    " · tree · answer (deltas + citations)\n"
+    "keys: q quit | c clear log | ? this help\n"
+    "panels: status (phase + clock) | counters | log (wraps, no deltas)"
+    " | tree | answer (deltas + citations)\n"
     "same event stream as `rla run`; needs Windows Terminal, not conhost"
 )
 
