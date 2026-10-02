@@ -522,3 +522,113 @@ def test_a7_router_describes_its_own_configuration(tmp_path):
     assert described["answer_model"] == settings.model_for_answer
     assert "fallback_chain" in described
     assert described["timeout_seconds"] == settings.llm_timeout_seconds
+
+
+# ---------------------------------------------------------------------------
+# Task 11: a fully local pipeline needs no Gemini key
+# ---------------------------------------------------------------------------
+
+
+def test_a_fully_local_pipeline_needs_no_gemini_key(tmp_path):
+    """`build_client` used to return None without the Gemini key, which the
+    orchestrator reads as degrade mode -- so "run everything locally" still
+    required a Gemini credential."""
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="",
+        llm_provider="ollama",
+        structured_model="ollama/qwen3:4b",
+        fast_model="ollama/qwen3:4b",
+        answer_model="ollama/qwen3:4b",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+    )
+    assert build_client(settings) is not None
+
+
+def test_a_local_embedding_provider_also_needs_no_gemini_key(tmp_path):
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="",
+        embedding_model="ollama/nomic-embed-text",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+    )
+    assert build_embedder(settings) is not None
+
+
+def test_no_usable_provider_still_degrades(tmp_path):
+    """The keyless degrade mode must survive: it is what makes `rla build` work
+    with no credentials at all."""
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="",
+        llm_provider="gemini",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+    )
+    assert build_client(settings) is None
+
+
+async def test_a_fully_local_run_makes_zero_gemini_calls(tmp_path):
+    """Locality proof with no live server: construction plus request inspection.
+
+    A fully local pipeline must not merely *tolerate* a missing Gemini key --
+    it must never touch Gemini at all. respx stands in for the Ollama server,
+    so every outbound request is inspectable and any call to a non-local host
+    fails the test instead of reaching the network.
+    """
+    import respx
+
+    from rla.llm.retry import reset_limiter, reset_spender
+
+    reset_limiter()
+    reset_spender()
+    try:
+        local = "http://localhost:9999"
+        settings = Settings(
+            _env_file=None,
+            gemini_api_key="",
+            llm_provider="ollama",
+            structured_model="ollama/qwen3:4b",
+            fast_model="ollama/qwen3:4b",
+            answer_model="ollama/qwen3:4b",
+            embedding_model="ollama/nomic-embed-text",
+            ollama_url=local,
+            llm_rpm=60,
+            data_dir=tmp_path,
+            raw_dir=tmp_path / "raw",
+            graph_dir=tmp_path / "graph",
+        )
+        client = build_client(settings)
+        assert isinstance(client, ProviderRouter)
+        assert client.backend.provider_for(settings.model_for_structured) == "ollama"
+        assert client.backend.provider_for(settings.model_for_answer) == "ollama"
+
+        with respx.mock(base_url=local, assert_all_called=False) as mock:
+            mock.post("/api/generate").respond(
+                json={
+                    "response": "local answer",
+                    "done": True,
+                    "prompt_eval_count": 1,
+                    "eval_count": 1,
+                }
+            )
+            mock.post("/api/embed").respond(json={"embeddings": [[0.1, 0.2, 0.3]]})
+
+            assert await client.generate_text("what is GAT?", stage="answer") == "local answer"
+
+            embedder = build_embedder(settings)
+            assert type(embedder).__name__ == "OllamaEmbedder"
+            assert await embedder.embed_one("graph attention networks") == [0.1, 0.2, 0.3]
+
+            assert mock.calls, "expected the local server to be called"
+            for call in mock.calls:
+                assert call.request.url.host == "localhost"
+            assert client.backend.live_backends() == {"ollama": "ollama"}
+    finally:
+        reset_limiter()
+        reset_spender()

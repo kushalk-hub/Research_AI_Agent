@@ -60,9 +60,43 @@ def build_client(
     keyless sources still produce a corpus.
     """
     settings = settings or get_settings()
-    if not settings.gemini_api_key:
+    # A client exists when *any* configured provider is usable, not only when the
+    # Gemini key is present. Keying this on one credential would make a fully
+    # local pipeline still require a Gemini key, and the orchestrator would read
+    # the resulting None as degrade mode.
+    if not _has_usable_provider(settings):
         return None
     return ProviderRouter(build_backend(settings, cache, tracker), settings, cache, tracker)
+
+
+def _has_usable_provider(settings: Settings) -> bool:
+    """Whether at least one configured model can actually be served.
+
+    A Gemini model needs the Gemini key. A local Ollama model needs no credential
+    at all, only a running server -- so a missing key must not disable it.
+    """
+    try:
+        models = (
+            settings.model_for_structured,
+            settings.model_for_answer,
+            settings.fast_model,
+        )
+    except Exception:
+        return False
+    for model in models:
+        try:
+            provider = settings.canonical_model(model).split("/", 1)[0]
+        except Exception:
+            continue
+        if provider == "ollama":
+            return True
+        if provider == "gemini" and settings.gemini_api_key:
+            return True
+        if provider not in ("ollama", "gemini") and settings.gemini_api_key:
+            # LiteLLM providers read their own credential; the OpenRouter key is
+            # configured here, so its presence is the signal we have.
+            return True
+    return False
 
 
 def build_embedder(
