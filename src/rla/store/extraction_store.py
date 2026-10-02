@@ -174,3 +174,20 @@ def reconcile_extractions(corpus: Corpus, extractions: Iterable[Extraction]) -> 
             return self._items
 
     return reconcile(corpus, _View(extractions))  # type: ignore[arg-type]
+
+
+def prune_stale(corpus: Corpus, store: ExtractionStore) -> list[str]:
+    """Delete entries that do not describe the current corpus.
+
+    Removes both `stale` and `superseded` entries. Returns human-readable labels
+    so the operator can see what went: a paper id for staleness, `id@<hash>` for
+    superseded content.
+    """
+    report = reconcile(corpus, store)
+    doomed = {e.paper_hash for e in report.stale}
+    doomed |= {e.paper_hash for e in report.superseded}
+    labels = [e.paper_id for e in report.stale]
+    labels += [f"{e.paper_id}@{e.paper_hash[:8]}" for e in report.superseded]
+
+    store.rewrite([e for e in store.all() if e.paper_hash not in doomed])
+    return sorted(labels)

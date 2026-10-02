@@ -10,6 +10,9 @@ from it -- a second, independent route to the same wrong graph.
 
 from __future__ import annotations
 
+from typer.testing import CliRunner
+
+from rla.cli import app
 from rla.models import Corpus, Extraction, Paper
 from rla.store.extraction_store import ExtractionStore, reconcile
 
@@ -176,3 +179,109 @@ def test_the_advice_distinguishes_the_two_failure_classes(tmp_path):
 def test_a_healthy_store_needs_no_advice(tmp_path):
     target = make_corpus("p1")
     assert "agree" in reconcile(target, fill(tmp_path, target.papers)).advice
+
+
+# -- Task 3: prune + status ---------------------------------------------------
+
+
+def _settings(tmp_path, **kw):
+    from rla.config import Settings
+
+    base = {
+        "_env_file": None,
+        "gemini_api_key": "k",
+        "data_dir": tmp_path,
+        "raw_dir": tmp_path / "raw",
+        "graph_dir": tmp_path / "graph",
+    }
+    base.update(kw)
+    return Settings(**base)
+
+
+def _seed_corpus_and_store(tmp_path):
+    """Write a corpus.json and an extractions.jsonl that agree with each other."""
+    target = make_corpus("current1", "current2")
+    (tmp_path / "corpus.json").write_text(target.model_dump_json(), encoding="utf-8")
+    store = ExtractionStore(tmp_path / "extractions.jsonl")
+    for paper in target.papers:
+        store.add(
+            Extraction(paper_id=paper.id, paper_hash=paper.ensure_hash(), summary="s")
+        )
+    return target, store
+
+
+def test_prune_removes_stale_and_superseded_entries(tmp_path):
+    from rla.store.extraction_store import prune_stale
+
+    before = make_corpus("keep", "drop", abstract="ORIGINAL")
+    old_keep_hash = before.papers[0].ensure_hash()
+    store = fill(tmp_path, before.papers)
+
+    after = make_corpus("keep", abstract="CHANGED")
+    store.add(
+        Extraction(
+            paper_id="keep", paper_hash=after.papers[0].ensure_hash(), summary="new"
+        )
+    )
+
+    removed = prune_stale(after, store)
+
+    assert sorted(removed) == ["drop", "keep@" + old_keep_hash[:8]]
+    assert {e.summary for e in store.all()} == {"new"}
+
+
+def test_prune_leaves_a_healthy_store_untouched(tmp_path):
+    from rla.store.extraction_store import prune_stale
+
+    target = make_corpus("p1")
+    store = fill(tmp_path, target.papers)
+    assert prune_stale(target, store) == []
+    assert len(store.all()) == 1
+
+
+def test_the_status_command_reports_a_store_that_agrees(tmp_path, monkeypatch):
+    _seed_corpus_and_store(tmp_path)
+    monkeypatch.setattr("rla.cli.get_settings", lambda: _settings(tmp_path))
+
+    result = CliRunner().invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "agree" in result.stdout
+
+
+def test_status_reports_a_graph_that_does_not_match_the_corpus(tmp_path, monkeypatch):
+    """Store and corpus can both be current while the graph on disk is from an
+    older build. That is a real state, and checking only the store would call it
+    healthy."""
+    from rla.models import Paper
+    from rla.store.graph_store import build_graph, save
+
+    _seed_corpus_and_store(tmp_path)
+    settings = _settings(tmp_path)
+
+    graph, _counts, _violations = build_graph(
+        [Paper(id="an-old-paper", title="Old", year=2020)], [], []
+    )
+    save(graph, settings.graph_json, settings.graph_graphml)
+
+    monkeypatch.setattr("rla.cli.get_settings", lambda: settings)
+
+    result = CliRunner().invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "graph stale papers" in result.stdout
+    assert "an-old-paper" in result.stdout
+
+
+def test_status_costs_nothing(tmp_path, monkeypatch):
+    """No network, no model, no LLM budget -- it is a diagnosis command."""
+    import rla.cli as cli
+
+    _seed_corpus_and_store(tmp_path)
+    monkeypatch.setattr("rla.cli.get_settings", lambda: _settings(tmp_path))
+    called = []
+    monkeypatch.setattr(cli, "build_client", lambda *a, **k: called.append(1))
+
+    CliRunner().invoke(app, ["status"])
+
+    assert called == []
