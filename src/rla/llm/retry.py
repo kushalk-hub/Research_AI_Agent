@@ -189,6 +189,19 @@ def is_retryable(exc: BaseException) -> bool:
     status = _status(exc)
     if status is not None:
         return status in _RETRYABLE_STATUS
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover - httpx is a hard dependency
+        httpx = None  # type: ignore[assignment]
+    if httpx is not None and isinstance(
+        exc, (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)
+    ):
+        # Transport failures carry no HTTP status and often a terse message
+        # ("dns fail") that matches no known phrase, so the checks below miss
+        # them. They are transient by nature: worth a retry, and -- once
+        # normalised -- fallback-eligible as NETWORK_ERROR. The status check
+        # above still runs first, so an httpx 4xx (bad input) fails fast.
+        return True
     if isinstance(exc, (asyncio.TimeoutError, ConnectionError, OSError)):
         return True
     # The SDK surfaces a severed stream as a plain message, with no status.
@@ -262,7 +275,12 @@ async def call_with_retry(
                 # `LLMError`, so every existing `except LLMError` handler still holds.
                 raise
             if not retryable(exc):
-                raise LLMError(f"{stage}: {exc}") from exc
+                # Preserve the category: a bare LLMError normalises to UNKNOWN,
+                # which is neither retried nor fallen back from, silently
+                # disabling failover for the exact fault it exists to handle.
+                from rla.llm.error_map import normalize
+
+                raise normalize(exc, stage=stage) from exc
             if is_daily_quota(exc):
                 summary = quota_summary(exc)
                 # Raised as a *typed* error, not a bare LLMError. The category has
