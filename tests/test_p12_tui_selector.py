@@ -58,7 +58,7 @@ class FakeRouter:
 
     def emit_fallback(self, stage: str, src: str, dst: str, reason: str) -> None:
         assert self.on_fallback is not None, "observer not registered"
-        self.on_fallback(stage, src, dst, reason)
+        self.on_fallback((stage, src, dst, reason))
 
 
 # -- the PipelineState routing extensions (plan Task 6, step 1) ----------------
@@ -156,7 +156,7 @@ def test_clear_all_calls_clear_overrides():
     assert s.overrides == {}
 
 
-def test_the_fallback_observer_receives_four_positional_args():
+def test_the_fallback_observer_receives_a_single_tuple():
     s = state()
     router = FakeRouter()
     connect_router(s, router)

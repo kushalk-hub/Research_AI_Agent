@@ -176,16 +176,13 @@ def selector_lines(
 def connect_router(state: PipelineState, router: Any) -> Callable[..., None]:
     """Register the fallback observer on Agent B's router (locked names only).
 
-    The router invokes the observer as `on_fallback(stage, from, to, reason)`.
-    It only records into state: eligibility, ordering and the retry/fallback
-    split stay entirely inside the router.
+    The router invokes the observer with ONE tuple, `on_fallback(entry)`
+    where `entry` is `(stage, from, to, reason)` (normative per P12 Task 4,
+    Agent B commit 87477a1). It only records into state: eligibility,
+    ordering and the retry/fallback split stay entirely inside the router.
     """
-
-    def _on_fallback(stage: str, from_model: str, to_model: str, reason: str) -> None:
-        state.record_fallback(stage, from_model, to_model, reason)
-
-    router.on_fallback = _on_fallback
-    return _on_fallback
+    router.on_fallback = lambda entry: state.record_fallback(*entry)
+    return router.on_fallback
 
 
 class SelectorPanel(_StateView):
