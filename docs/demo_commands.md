@@ -32,8 +32,9 @@ prints *"LLM stages will not run without a key"* if `GEMINI_API_KEY` is blank.
 rla doctor --llm
 ```
 
-Probes every configured model with a real request. **Costs 3 requests** (fast, answer,
-embedding) and is deliberately uncached, so a green light means a request went out *now*.
+Probes every configured model with a real request. **Costs 3 requests** (structured, answer,
+embedding — see `_probe_plan` in `src/rla/cli.py`) and is deliberately uncached, so a green light
+means a request went out *now*.
 
 **Verified 2026-10-01: green.** `structured gemini-2.5-flash-lite ok`, `answer
 gemini-2.5-flash ok`, `embedding gemini-embedding-001 ok (3072 dims)`. The free tier allows
@@ -78,7 +79,7 @@ rla run -t "Graph Attention Networks"
 ```
 
 The headline demo. Every stage emits a line as it happens — `search`, `fetch`, `score`,
-`extract`, `resolve`, `graph`, `traverse`, `answer`, `done`.
+`fulltext` (pending stub), `extract`, `resolve`, `graph`, `traverse`, `answer`, `done`.
 
 Add a question to also get an answer:
 
@@ -92,14 +93,18 @@ Machine-readable, for piping into jq or a log:
 rla run -t "Graph Attention Networks" --jsonl
 ```
 
-**Verified 2026-10-01:** completes end to end and builds a real graph —
-`135 nodes (30 papers, 105 concepts), 104 edges (64 citation, 40 derived)`, all 30 papers
-carrying relevance scores 3/4/5, so the LLM scoring stage genuinely ran.
+**Verified 2026-10-01:** completes end to end and builds a real graph, with all 30 papers
+carrying relevance scores 3/4/5, so the LLM scoring stage genuinely ran. Graph counts are
+`rla stats` as of 2026-10-02 — the graph is local (`data/graph/` is gitignored), so run
+`rla stats` for your own numbers: `192 nodes (30 papers, 162 concepts), 140 edges (20 CITES,
+120 derived)`.
 
 > **Caveat on this machine's committed data.** `data/extractions.jsonl` and `data/corpus.json`
-> currently describe **different corpora** (zero shared paper ids), and `add_relations` silently
-> skips relations whose endpoint is absent. The result is a graph with zero `INTRODUCES`/`USES`
-> edges and null concept years. See the recovery recipe in
+> currently describe **different corpora** (verified 2026-10-02: `rla status` reports 0 matched,
+> 26 stale, 30 missing — zero shared paper ids), and `add_relations` silently skips relations
+> whose endpoint is absent. The visible symptom depends on what was last built: missing
+> `INTRODUCES`/`USES` edges, `first_seen_year: null` concepts, or a graph `rla status` flags as
+> stale. Run `rla status` for the current agreement. Recovery recipe:
 > [`OPERATIONS_GUIDE.md`](OPERATIONS_GUIDE.md) §5. Fix it before demoing lineage.
 
 ---
@@ -118,7 +123,8 @@ citation id not in the subgraph is stripped and reported.
 
 **Verified 2026-10-01:** classifies LINEAGE, streams a cited answer naming `[C5]`, `[C11]`,
 `[C14]` and others, and correctly self-reports the one thing it cannot do — order the chain
-chronologically — because concept years are null in the current graph.
+chronologically — because concept years were null in the graph that run built (the local graph
+has changed since; `rla stats` / `rla report` show today's state).
 
 **Five** question types map to different traversals — lineage, gap, comparison, approaches,
 full-report. `rla ask` classifies automatically from keywords; the traversal is pure code, no model
@@ -133,11 +139,12 @@ rla report
 rla report --jsonl        # machine-readable
 ```
 
-Reads the corpus and stored extractions, no LLM calls. **Currently reports 26 papers
-analysed, 0 stating a limitation, 0 themes, 0 structural gaps** — a real finding about the
-current extraction store, not a failure: every stored `stated_limitation` is empty, and every
-concept's `first_seen_year` is null, so nothing can be old enough to count as abandoned.
-See `PLAN.md` P2/P4 before presenting this as a demo of gap analysis.
+Reads the corpus and stored extractions, no LLM calls. **As of 2026-10-02: 26 papers
+analysed, 0 stating a limitation, 0 themes, 48 structural gaps.** The zero-limitation half is
+a real finding about the current extraction store (every stored `stated_limitation` is empty),
+not a failure. Structural gaps come from concept `first_seen_year` values in the local graph,
+so re-run `rla report` for live numbers. See `PLAN.md` P2/P4 before presenting this as a demo
+of gap analysis.
 
 ---
 
@@ -175,7 +182,7 @@ Keys: `q` quit, `c` clear log.
 ## 10. Developer commands
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -q               # 529 tests, ~68s
+.\.venv\Scripts\python.exe -m pytest tests/ -q               # 668 tests, ~80s
 .\.venv\Scripts\python.exe -m ruff check src/ tests/         # lint
 
 # focused
@@ -223,7 +230,8 @@ See `docs/llm_provider_migration_plan.md` for the design and
 2. `rla sources` — show which academic APIs actually respond right now.
 3. `rla stats` — the corpus is already built and committed (30 papers at the current cap).
 4. `rla run -t "Graph Attention Networks"` — the event stream building a real graph.
-5. `rla stats` again — node and edge counts went from nothing to 206/323.
+5. `rla stats` again — node and edge counts went from nothing to 192 nodes / 140 edges
+   (measured 2026-10-02; run `rla stats` for the current local graph).
 6. `rla ask "how did graph attention networks evolve?"` — a cited answer streaming in.
 7. `rla report` — limitations and gaps, with no model calls at all.
 8. `rla eval` — and the point: it reports `NOT MEASURED` rather than inventing a number.

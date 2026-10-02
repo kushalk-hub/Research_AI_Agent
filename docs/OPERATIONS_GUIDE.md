@@ -555,8 +555,8 @@ Two kinds of knob: **configuration** (env var → `.env`, no code change) and **
 |---|---|---|---|---|
 | `GEMINI_API_KEY` | `""` | — | The only credential the MVP needs. Blank ⇒ degrade mode | Always; `rla doctor --llm` verifies it |
 | `OPENAI_API_KEY` | `""` | — | Credential for a **second provider**. Named for the provider, not the routing role: a provider can be promoted to primary later, at which point `FALLBACK_API_KEY` would be actively misleading | You want cross-provider failover |
-| `RLA_LLM_PROVIDER` | `gemini` | `gemini` \| `litellm` | Which backend serves every call | Switching providers |
-| `RLA_FAST_MODEL` | `gemini-2.5-flash-lite` | — | Generic fallback; also what `doctor` probes | A tier change |
+| `RLA_LLM_PROVIDER` | `gemini` | `gemini` \| `litellm` \| `ollama` | Which backend serves every call | Switching providers |
+| `RLA_FAST_MODEL` | `gemini-2.5-flash-lite` | — | Generic fallback; `doctor --llm` reaches it via the structured role (empty `RLA_STRUCTURED_MODEL`), not directly | A tier change |
 | `RLA_STRONG_MODEL` | `gemini-2.5-flash` | — | Fallback for `RLA_ANSWER_MODEL`. Extraction and resolution use `RLA_STRUCTURED_MODEL` → `RLA_FAST_MODEL` instead (§3.4) | Cost control on a free key |
 | `RLA_STRUCTURED_MODEL` | `""` → `fast_model` | — | Model for the schema-constrained stages. See §3.4 for what really honours it | Balancing cost vs extraction quality |
 | `RLA_ANSWER_MODEL` | `""` → `strong_model` | — | Streamed answer generation, where quality is user-visible and volume is one call per question | Answer quality matters more than cents |
@@ -828,11 +828,14 @@ use `$env:PYTHONPATH="src"; python -m rla.cli`.
 
 ### Recovering from a stale `data/extractions.jsonl`
 
-The graph currently on disk has **zero** `INTRODUCES`/`USES`/`HAS_LIMITATION` edges, because the
-committed extraction store and the committed corpus share zero paper ids, and
-`store/graph_store.py:add_relations` silently skips any relation whose endpoint is not in the graph.
-Every concept consequently has `first_seen_year: null`, which is why `rla report` finds no
-structural gaps and `rla ask` says it cannot order the lineage chronologically.
+The committed extraction store and the committed corpus share zero paper ids (verified
+2026-10-02: `rla status` reports 0 matched, 26 stale, 30 missing), and
+`store/graph_store.py:add_relations` silently skips any relation whose endpoint is not in the
+graph. How that surfaces depends on what was last built: missing
+`INTRODUCES`/`USES`/`HAS_LIMITATION` edges, `first_seen_year: null` concepts (so `rla report`
+finds no structural gaps and `rla ask` cannot order the lineage chronologically), or a graph
+`rla status` flags as stale. Check the current state with `rla status`; `rla report` and
+`rla stats` show what the graph on disk actually contains today.
 
 Detect it — the graph report carries the signal:
 

@@ -48,9 +48,10 @@ Clone first (see Installation above), then note: `data/graph/` is gitignored, so
 1. Copy the template: `Copy-Item .env.example .env`
 2. Fill in what your mode needs (see Supported modes). `.env` is gitignored;
    never put a real key in `.env.example`.
-3. All variables use the `RLA_` prefix **except** `GEMINI_API_KEY`, which has an
-   explicit no-prefix alias (`src/rla/config.py`). Paths (`.env`, `data/`) resolve
-   relative to the repo root, not the CWD, so running from a subdirectory is safe.
+3. All variables use the `RLA_` prefix **except** `GEMINI_API_KEY` and
+   `OPENAI_API_KEY`, which have explicit no-prefix aliases (`src/rla/config.py`).
+   Paths (`.env`, `data/`) resolve relative to the repo root, not the CWD, so
+   running from a subdirectory is safe.
 
 Full variable list: [Config reference](#config-reference) and `.env.example`.
 
@@ -345,14 +346,15 @@ Key settings (defaults in `src/rla/config.py`):
 | Variable | Default | Notes |
 |---|---|---|
 | `GEMINI_API_KEY` | (blank → degrade mode) | no `RLA_` prefix; AI Studio key |
-| `RLA_FAST_MODEL` | `gemini-2.5-flash-lite` | generic fallback; `doctor` probes |
+| `OPENAI_API_KEY` | (blank) | no `RLA_` prefix; optional second-provider credential |
+| `RLA_FAST_MODEL` | `gemini-2.5-flash-lite` | generic fallback; `doctor --llm` reaches it via the structured role (empty `RLA_STRUCTURED_MODEL`) |
 | `RLA_STRONG_MODEL` | `gemini-2.5-flash` | fallback for answer role |
 | `RLA_STRUCTURED_MODEL` | (empty → `fast_model`) | 4 schema-constrained stages |
 | `RLA_ANSWER_MODEL` | (empty → `strong_model`) | streamed answers |
 | `RLA_EMBEDDING_MODEL` | `gemini-embedding-001` | or `ollama/nomic-embed-text` |
 | `RLA_FALLBACK_MODELS` | `gemini-2.5-flash` | ordered, comma-separated |
 | `RLA_FALLBACK_ON_QUOTA` | `false` | opt into failover on daily quota |
-| `RLA_LLM_PROVIDER` | `gemini` | `gemini` \| `litellm` (needs `[router]` extra) |
+| `RLA_LLM_PROVIDER` | `gemini` | `gemini` \| `litellm` (needs `[router]` extra) \| `ollama` |
 | `RLA_LLM_BASE_URLS` | (empty) | JSON map `{"provider": "url"}`; LiteLLM path only |
 | `RLA_STRUCTURED_OUTPUT_MODELS` | (empty) | operator assertion for LiteLLM-route local models |
 | `RLA_OLLAMA_URL` | `http://localhost:11434` | no `/v1`/`/api` suffix |
