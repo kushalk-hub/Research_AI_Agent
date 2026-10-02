@@ -7,13 +7,13 @@ import json
 import re
 from contextlib import suppress
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, NamedTuple
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from rla.config import get_settings
+from rla.config import Settings, get_settings
 from rla.events import Event
 from rla.llm.factory import build_client
 from rla.models import Corpus
@@ -52,6 +52,63 @@ PHASE_STYLE = {
 }
 
 
+class Probe(NamedTuple):
+    """One live health probe: a model, the roles that use it, and which capability.
+
+    Built by deduplicating roles onto canonical model ids, because `doctor --llm`
+    sends real uncached requests and probing one model three times costs quota
+    and time for no information. `kind` is `text` or `embedding`: `/api/embed`
+    is a different endpoint and a different capability, so an embedding probe is
+    never satisfied by a text probe even when both name the same model.
+    """
+
+    model: str
+    roles: tuple[str, ...]
+    kind: str
+
+
+def _probe_plan(settings: Settings) -> list[Probe]:
+    """The unique set of models `doctor --llm` should probe, and who uses each."""
+    roles_by_model: dict[str, list[str]] = {}
+    ordered: list[str] = []
+
+    def _note(model: str, role: str) -> None:
+        canonical = settings.canonical_model(model)
+        if canonical not in roles_by_model:
+            roles_by_model[canonical] = []
+            ordered.append(canonical)
+        roles_by_model[canonical].append(role)
+
+    _note(settings.model_for_structured, "structured")
+    _note(settings.model_for_structured, "extraction")
+    _note(settings.model_for_structured, "resolution")
+    _note(settings.model_for_answer, "answer")
+
+    plan = [Probe(m, tuple(roles_by_model[m]), "text") for m in ordered]
+    embedding = settings.canonical_model(settings.embedding_model)
+    plan.append(Probe(embedding, ("embedding",), "embedding"))
+    return plan
+
+
+def _apply_model_overrides(
+    settings: Settings, structured: str | None, answer: str | None
+) -> Settings:
+    """Return a copy of `settings` with transient per-stage overrides applied.
+
+    Canonicalised, so the cache key, the capability check and `doctor` all see one
+    identity. Nothing is written to `.env`: a command-line override is for this run
+    only, and persisting it would turn an experiment into permanent configuration.
+    """
+    updates: dict[str, str] = {}
+    if structured:
+        updates["structured_model"] = settings.canonical_model(structured)
+    if answer:
+        updates["answer_model"] = settings.canonical_model(answer)
+    if not updates:
+        return settings
+    return settings.model_copy(update=updates)
+
+
 def _pending(command: str) -> None:
     milestone = COMMAND_MILESTONE[command]
     console.print(
@@ -66,24 +123,27 @@ def _print_event(evt: Event) -> None:
     console.print(f"[{style}]{str(evt.phase):<9}[/] [{style}]{marker}[/] {evt.message}")
 
 
-def _build_pipeline() -> tuple[Pipeline, Cache, PipelineResult]:
+def _build_pipeline(
+    settings: Settings | None = None,
+) -> tuple[Pipeline, Cache, PipelineResult, Any]:
     """Wire the pipeline once, so `run` and `tui` cannot drift apart.
 
-    The LLM client is built by the factory from configuration, so selecting a
-    provider is an env var rather than a code edit.
-
-    Returns the cache too because the caller owns its lifetime: `run` closes it
-    when the stream ends, the TUI closes it when the worker finishes.
+    Returns the router as well: the TUI registers a fallback observer on it, and
+    `doctor` reports what it resolved. The caller owns the cache's lifetime --
+    `run` closes it when the stream ends, the TUI when the worker finishes.
     """
-    settings = get_settings()
+    settings = settings or get_settings()
     cache = Cache(settings.cache_db)
     tracker = CostTracker()
     llm = build_client(settings, cache, tracker)
-    return Pipeline(settings, llm, cache, tracker), cache, PipelineResult()
+    router = llm  # a ProviderRouter, or None in degrade mode
+    return Pipeline(settings, llm, cache, tracker), cache, PipelineResult(), router
 
 
-async def _stream(title: str, question: str, as_jsonl: bool) -> PipelineResult:
-    pipeline, cache, result = _build_pipeline()
+async def _stream(
+    settings: Settings, title: str, question: str, as_jsonl: bool
+) -> PipelineResult:
+    pipeline, cache, result, _router = _build_pipeline(settings)
     try:
         if as_jsonl:
             async for evt in pipeline.run(title, question, result):
@@ -101,11 +161,24 @@ def run(
     title: Annotated[str, typer.Option("--title", "-t", help="Research project title.")] = "",
     question: Annotated[str, typer.Option("--question", "-q", help="Question to answer.")] = "",
     jsonl: Annotated[bool, typer.Option("--jsonl", help="Emit one JSON event per line.")] = False,
+    structured_model: Annotated[
+        str,
+        typer.Option(
+            "--structured-model",
+            help="Override the model for the schema-constrained stages.",
+        ),
+    ] = "",
+    answer_model: Annotated[
+        str, typer.Option("--answer-model", help="Override the model for answer generation.")
+    ] = "",
 ) -> None:
     """Run the pipeline, streaming events as they happen."""
     if not title:
         title = typer.prompt("Research project title")
-    asyncio.run(_stream(title, question, jsonl))
+    settings = _apply_model_overrides(
+        get_settings(), structured_model or None, answer_model or None
+    )
+    asyncio.run(_stream(settings, title, question, jsonl))
 
 
 @app.command()
@@ -158,66 +231,51 @@ def doctor(
     console.print(f"LLM [{'green' if status == 'ok' else 'red'}]{status}[/] {detail}")
 
 
-async def _probe_llm(settings) -> tuple[str, str]:
-    """Verify the key against the live API.
+async def _probe_llm(settings: Settings) -> tuple[str, str]:
+    """Verify every configured model against the live API.
 
-    Deliberately constructed *without* a cache. A cache-first probe reports a
+    Deliberately constructed *without* a cache: a cache-first probe reports a
     stale "ok" from a call that succeeded under an earlier key, which is exactly
-    the situation this command exists to detect -- a green light here must mean
-    a real request went out just now.
+    the situation this command exists to detect.
 
-    Every configured model is probed, not just the text one. A key can be
-    perfectly valid while a model on it is retired (404) or outside the tier
-    (429 "limit: 0"), and those failures only surface much later as a dead
-    extraction or resolution stage.
-
-    Probes the *configured* backend, so `RLA_LLM_PROVIDER=litellm rla doctor --llm`
-    verifies the routing layer rather than the Gemini SDK behind it.
+    The probe set is deduplicated by canonical model id, so three stages sharing
+    one model cost one request rather than three.
     """
-    from rla.llm.base import LLMError
-    from rla.llm.embeddings import Embedder
-    from rla.llm.errors import ProviderError
-    from rla.llm.factory import build_client
+    from rla.llm.errors import LLMError, ProviderError
+    from rla.llm.factory import build_client as _bc
+    from rla.llm.factory import build_embedder as _be
+    from rla.store.cache import CostTracker as _CT
 
     try:
-        client = build_client(settings, None, CostTracker())
+        client = _bc(settings, None, _CT())
+        embedder = _be(settings, None, _CT())
     except Exception as exc:
-        return "unusable", f"cannot build the configured backend: {exc}"
-    if client is None:
-        return "unusable", "GEMINI_API_KEY is not set"
+        return "unusable", f"cannot build the configured backends: {exc}"
+    if client is None and embedder is None:
+        return "unusable", "no usable provider is configured"
 
     problems: list[str] = []
-
-    for label, model in (
-        ("structured", settings.model_for_structured),
-        ("answer", settings.model_for_answer),
-    ):
+    for probe in _probe_plan(settings):
+        console.print(f"[bold]{probe.kind}[/] {probe.model}")
+        console.print(f"  [dim]roles: {', '.join(probe.roles)}[/]")
         try:
-            text = await client.generate_text(
-                "Reply with the single word: ok", stage="doctor", model=model
-            )
-            detail = f"{label} {model} ok ({text.strip()[:20]!r})"
-        except LLMError as exc:
+            if probe.kind == "embedding":
+                vector = await embedder.embed_one("doctor")
+                detail = f"ok ({len(vector)} dims)"
+            else:
+                text = await client.generate_text(
+                    "Reply with the single word: ok", stage="doctor", model=probe.model
+                )
+                detail = f"ok {text.strip()[:20]!r}"
+        except (LLMError, ProviderError) as exc:
             reason = " ".join(str(exc).split())
-            problems.append(f"{label} {model}: {reason[:120]}{_hint(reason)}")
-            continue
-        if not problems:
-            console.print(f"[green]{detail}[/]")
-
-    console.print(f"[dim]backend: {client.backend.name}[/]")
-
-    try:
-        vector = await Embedder(settings, None, CostTracker()).embed_one("doctor")
-        if not problems:
-            console.print(
-                f"[green]embedding {settings.embedding_model} ok ({len(vector)} dims)[/]"
-            )
-    except (LLMError, ProviderError) as exc:
-        reason = " ".join(str(exc).split())
-        problems.append(f"embedding {settings.embedding_model}: {reason[:120]}{_hint(reason)}")
+            problems.append(f"{probe.model}: {reason[:120]}{_hint(reason)}")
+            console.print(f"  [red]unusable[/] {reason[:160]}")
+        else:
+            console.print(f"  [green]{detail}[/]")
 
     if not problems:
-        return "ok", f"{settings.model_for_structured}, {settings.embedding_model} reachable"
+        return "ok", "every configured model is reachable"
     return "unusable", "; ".join(problems)
 
 
@@ -346,11 +404,24 @@ async def _probe_sources(probe: str, use_cache: bool = False) -> None:
 def build(
     title: Annotated[str, typer.Option("--title", "-t", help="Research project title.")] = "",
     jsonl: Annotated[bool, typer.Option("--jsonl", help="Emit one JSON event per line.")] = False,
+    structured_model: Annotated[
+        str,
+        typer.Option(
+            "--structured-model",
+            help="Override the model for the schema-constrained stages.",
+        ),
+    ] = "",
+    answer_model: Annotated[
+        str, typer.Option("--answer-model", help="Override the model for answer generation.")
+    ] = "",
 ) -> None:
     """Acquire a corpus of 40-100 papers from every enabled source."""
     if not title:
         title = typer.prompt("Research project title")
-    result = asyncio.run(_stream(title, "", jsonl))
+    settings = _apply_model_overrides(
+        get_settings(), structured_model or None, answer_model or None
+    )
+    result = asyncio.run(_stream(settings, title, "", jsonl))
     if result.corpus is None:
         raise typer.Exit(code=1)
     _print_acquisition(result)
@@ -524,6 +595,16 @@ def eval() -> None:
 def tui(
     title: Annotated[str, typer.Option("--title", "-t", help="Research project title.")] = "",
     question: Annotated[str, typer.Option("--question", "-q", help="Question to answer.")] = "",
+    structured_model: Annotated[
+        str,
+        typer.Option(
+            "--structured-model",
+            help="Override the model for the schema-constrained stages.",
+        ),
+    ] = "",
+    answer_model: Annotated[
+        str, typer.Option("--answer-model", help="Override the model for answer generation.")
+    ] = "",
 ) -> None:
     """Run the pipeline in a live terminal UI: phases, counters, tree, answer.
 
@@ -544,12 +625,15 @@ def tui(
     if not title:
         title = typer.prompt("Research project title")
 
+    settings = _apply_model_overrides(
+        get_settings(), structured_model or None, answer_model or None
+    )
     state = PipelineState(title=title, question=question)
-    if not get_settings().gemini_api_key:
+    if not settings.gemini_api_key:
         # Warn before the app takes over the screen, or it scrolls off unseen.
         console.print("[yellow]no GEMINI_API_KEY set;[/] LLM stages will be skipped.")
 
-    pipeline, cache, result = _build_pipeline()
+    pipeline, cache, result, router = _build_pipeline(settings)
 
     async def _events():
         try:

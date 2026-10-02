@@ -992,6 +992,9 @@ def test_the_doctor_llm_probe_never_reports_a_stale_cached_ok(settings, monkeypa
     # The invariant under test is unchanged: the probe must be constructed with a
     # None cache, whatever backend is selected.
     monkeypatch.setattr("rla.llm.factory.build_client", lambda *a, **k: RecordingClient(*a, **k))
+    monkeypatch.setattr(
+        "rla.llm.factory.build_embedder", lambda *a, **k: RecordingEmbedder(*a, **k)
+    )
     monkeypatch.setattr("rla.cli.Embedder", RecordingEmbedder, raising=False)
     monkeypatch.setattr("rla.llm.embeddings.Embedder", RecordingEmbedder)
     status, detail = asyncio.run(_probe_llm(settings))
