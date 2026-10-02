@@ -12,11 +12,16 @@ from rla.llm.base import LLMError
 from rla.models import Concept, ConceptMention, Extraction
 from rla.pipeline.resolve import (
     AUTO_MERGE,
+    EMBEDDING_THRESHOLDS,
     MAX_JUDGE_CALLS,
+    MAYBE_MERGE,
     STAGE,
+    MergeDecision,
+    MergeThresholds,
     collect_mentions,
     normalise_name,
     resolve_concepts,
+    thresholds_for,
 )
 from rla.store.cache import CostTracker
 
@@ -287,10 +292,12 @@ async def test_merging_is_transitive_across_a_chain_of_pairs():
     assert nodes[0]["paper_ids"] == ["p1", "p2", "p3"]
 
 
-async def test_the_judge_budget_is_bounded_and_the_cutoff_is_reported(monkeypatch):
+async def test_the_judge_budget_is_bounded_and_the_cutoff_is_reported():
     # Auto-merge is free, so it must not be what stops the run: push its threshold
-    # out of reach to isolate the judge budget as the only limiter.
-    monkeypatch.setattr("rla.pipeline.resolve.AUTO_MERGE", 1.1)
+    # out of reach to isolate the judge budget as the only limiter. Thresholds now
+    # travel explicitly per embedding space (P12 Task 9), so the override is passed
+    # as a parameter rather than monkeypatched onto the module.
+    out_of_reach = MergeThresholds(auto=1.1, maybe=MAYBE_MERGE, calibrated=True)
     names = [f"concept {i}" for i in range(45)]
     judge = FakeJudge(
         {(names[i], names[j]): "different" for i in range(45) for j in range(i + 1, 45)}
@@ -299,7 +306,9 @@ async def test_the_judge_budget_is_bounded_and_the_cutoff_is_reported(monkeypatc
     embedder = FakeEmbedder(fn=lambda text: vec(float(text.split()[1]) * 1.0))
     extractions = [extraction(f"p{i}", name) for i, name in enumerate(names)]
 
-    events, nodes, decisions = await drain(extractions, llm=judge, embedder=embedder)
+    events, nodes, decisions = await drain(
+        extractions, llm=judge, embedder=embedder, thresholds=out_of_reach
+    )
 
     assert len(judge.calls) == MAX_JUDGE_CALLS
     assert len(decisions) == MAX_JUDGE_CALLS
@@ -511,3 +520,112 @@ async def test_resolve_reports_pending_when_extraction_has_not_run(settings, cac
     assert resolve_events
     assert resolve_events[0].kind == "pending"
     assert "no extractions" in resolve_events[0].message
+
+
+# ---------------------------------------------------------------------------
+# P12: thresholds belong to an embedding space, not to the project
+# ---------------------------------------------------------------------------
+
+
+def test_the_gemini_thresholds_are_unchanged():
+    """0.92 / 0.70 were calibrated on Gemini's embedding space; they must not move."""
+    assert AUTO_MERGE == 0.92
+    assert MAYBE_MERGE == 0.70
+    calibrated = thresholds_for("gemini/gemini-embedding-001")
+    assert calibrated.auto == 0.92
+    assert calibrated.maybe == 0.70
+    assert calibrated.calibrated is True
+
+
+def test_thresholds_are_keyed_by_canonical_id():
+    """Two providers exposing the same bare model name must not collide."""
+    assert "gemini/gemini-embedding-001" in EMBEDDING_THRESHOLDS
+
+
+def test_an_unknown_embedding_space_is_uncalibrated_and_disables_auto_merge():
+    uncalibrated = thresholds_for("ollama/nomic-embed-text")
+    assert uncalibrated.auto is None
+    assert uncalibrated.calibrated is False
+    # The judge floor still exists, so candidates are still surfaced.
+    assert uncalibrated.maybe > 0
+
+
+async def test_an_uncalibrated_space_performs_zero_auto_merges():
+    """The safety property: more duplicates, never a fused lineage path."""
+    extractions = [
+        extraction(
+            "p1", "Graph Attention Networks", description="attention over a neighbourhood"
+        ),
+        extraction(
+            "p2", "graph attention networks", description="attention over a neighbourhood"
+        ),
+        extraction("p3", "Deep Reinforcement Learning", description="policies from rewards"),
+    ]
+
+    class PerfectEmbedder:
+        model_id = "ollama/nomic-embed-text"
+
+        def __init__(self):
+            self.dimensions = 3
+
+        async def embed_many(self, texts):
+            return [[1.0, 0.0, 0.0] for _ in texts]
+
+    decisions: list[MergeDecision] = []
+    async for evt in resolve_concepts(
+        extractions,
+        llm=AlwaysSame(),
+        embedder=PerfectEmbedder(),
+        concurrency=1,
+        thresholds=thresholds_for("ollama/nomic-embed-text"),
+    ):
+        if "decisions" in evt.payload:
+            decisions = [MergeDecision(**d) for d in evt.payload["decisions"]]
+
+    auto = [d for d in decisions if d.reason == "auto-similarity"]
+    assert not auto, f"auto-merge must be off for an uncalibrated space: {auto}"
+    assert EMBEDDING_THRESHOLDS["gemini/gemini-embedding-001"].auto == 0.92
+
+
+async def test_the_judge_stays_within_its_budget_for_an_uncalibrated_space():
+    calls = 0
+
+    class Counting:
+        async def generate_structured(
+            self, prompt, schema, *, model=None, temperature=0.0, stage="llm", retries=2
+        ):
+            nonlocal calls
+            calls += 1
+            return schema.model_construct(verdict="different", confidence=0.5, canonical="")
+
+    vectors = [[1.0, i / 100.0, 0.0] for i in range(20)]
+    extractions = [extraction(f"p{i}", f"concept {i}") for i in range(20)]
+
+    async for _ in resolve_concepts(
+        extractions,
+        llm=Counting(),
+        embedder=VectorEmbedder(vectors),
+        concurrency=1,
+        thresholds=thresholds_for("ollama/nomic-embed-text"),
+    ):
+        pass
+
+    assert calls <= MAX_JUDGE_CALLS
+
+
+class AlwaysSame:
+    async def generate_structured(
+        self, prompt, schema, *, model=None, temperature=0.0, stage="llm", retries=2
+    ):
+        return schema.model_construct(verdict="different", confidence=0.5, canonical="")
+
+
+class VectorEmbedder:
+    model_id = "ollama/nomic-embed-text"
+
+    def __init__(self, vectors):
+        self.vectors = vectors
+        self.dimensions = len(vectors[0])
+
+    async def embed_many(self, texts):
+        return self.vectors[: len(texts)]

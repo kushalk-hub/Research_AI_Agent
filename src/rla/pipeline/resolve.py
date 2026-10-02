@@ -28,15 +28,51 @@ from pydantic import BaseModel, Field
 
 from rla.events import Event, Phase, event
 from rla.llm.base import LLMClient, LLMError
-from rla.llm.embedding_base import cosine
-from rla.llm.embeddings import Embedder
+from rla.llm.embedding_base import EmbeddingProvider, cosine
 from rla.llm.errors import ProviderError
 from rla.llm.prompts.templates import CONCEPT_RESOLUTION
 from rla.models import Concept, Extraction
 from rla.store.cache import CostTracker
 
 STAGE = "resolution"
-#: At or above this cosine, two clusters are the same thing without asking anyone.
+#: Similarity thresholds are a property of an EMBEDDING SPACE, not of the
+#: project. 0.92 / 0.70 were calibrated against Gemini's; transferring them to a
+#: different space would be a hidden behavioural change in the one place where
+#: being wrong silently deletes a lineage path.
+@dataclass(frozen=True, slots=True)
+class MergeThresholds:
+    """Similarity boundaries for one embedding model.
+
+    `auto is None` means automatic merging is disabled for this space entirely.
+    That is the safe direction: every candidate then goes to the bounded judge
+    path, which fails toward duplicates, so the cost of being wrong is a visible
+    duplicate rather than a fused lineage path.
+    """
+
+    auto: float | None
+    maybe: float
+    calibrated: bool
+
+
+EMBEDDING_THRESHOLDS: dict[str, MergeThresholds] = {
+    "gemini/gemini-embedding-001": MergeThresholds(auto=0.92, maybe=0.70, calibrated=True),
+}
+
+
+def thresholds_for(model_id: str) -> MergeThresholds:
+    """The thresholds for an embedding model, or a safe uncalibrated default.
+
+    Keyed by CANONICAL id, so two providers exposing the same bare model name
+    cannot collide.
+    """
+    known = EMBEDDING_THRESHOLDS.get(model_id)
+    if known is not None:
+        return known
+    return MergeThresholds(auto=None, maybe=MAYBE_MERGE, calibrated=False)
+
+
+#: Retained as module-level aliases so the existing P3 tests and any external
+#: reader keep working; these are Gemini's calibrated values.
 AUTO_MERGE = 0.92
 #: Below this they are certainly different. Only the band between is judged.
 MAYBE_MERGE = 0.70
@@ -191,8 +227,10 @@ def build_concept(members: Sequence[Mention], preferred: dict[str, str] | None =
     )
 
 
-def _similar_pairs(vectors: Sequence[Sequence[float]]) -> list[tuple[float, int, int]]:
-    """All pairs at or above MAYBE_MERGE, most similar first, for a bounded budget."""
+def _similar_pairs(
+    vectors: Sequence[Sequence[float]], floor: float = MAYBE_MERGE
+) -> list[tuple[float, int, int]]:
+    """All pairs at or above `floor`, most similar first, for a bounded budget."""
     pairs: list[tuple[float, int, int]] = []
     for i in range(len(vectors)):
         for j in range(i + 1, len(vectors)):
@@ -236,17 +274,20 @@ def _reason(error: Exception, limit: int = 140) -> str:
 async def resolve_concepts(
     extractions: Sequence[Extraction],
     llm: LLMClient | None = None,
-    embedder: Embedder | None = None,
+    embedder: EmbeddingProvider | None = None,
     concurrency: int = 4,
     tracker: CostTracker | None = None,
     model: str = "",
     paper_years: dict[str, int] | None = None,
+    thresholds: MergeThresholds | None = None,
 ) -> AsyncIterator[Event]:
     """Merge duplicate concept names.
 
     The final event carries `concepts` and `decisions` in its payload: the caller
     needs the result, but this stage returns nothing but events by contract.
     """
+    model_id = getattr(embedder, "model_id", None) or "gemini/gemini-embedding-001"
+    active = thresholds or thresholds_for(model_id)
     mentions = collect_mentions(extractions, paper_years)
     if not mentions:
         yield event(
@@ -302,8 +343,8 @@ async def resolve_concepts(
     judged = 0
     semaphore = asyncio.Semaphore(concurrency)
     if vectors:
-        for score, i, j in _similar_pairs(vectors):
-            if score >= AUTO_MERGE:
+        for score, i, j in _similar_pairs(vectors, active.maybe):
+            if active.auto is not None and score >= active.auto:
                 union.union(i, j)
                 decisions.append(
                     MergeDecision(
@@ -311,7 +352,7 @@ async def resolve_concepts(
                         merged=texts[max(i, j)],
                         verdict="same",
                         reason="auto-similarity",
-                        evidence=f"cosine={score:.3f} >= {AUTO_MERGE}",
+                        evidence=f"cosine={score:.3f} >= {active.auto}",
                         confidence=score,
                     )
                 )
@@ -390,14 +431,24 @@ async def resolve_concepts(
 
     refused = sum(1 for d in decisions if d.verdict == "different")
     cost = tracker.stage_report(STAGE, model) if tracker else None
+    calibration = (
+        f"thresholds CALIBRATED for {model_id} "
+        f"(auto>={active.auto}, judge floor {active.maybe})"
+        if active.calibrated and active.auto is not None
+        else f"thresholds UNCALIBRATED for {model_id}: automatic merging is DISABLED "
+        "and borderline pairs are going to the judge, bounded by "
+        f"{MAX_JUDGE_CALLS} calls"
+    )
     yield event(
         Phase.RESOLVE,
         f"{len(clusters)} names -> {len(concepts)} concepts "
         f"({len(clusters) - len(concepts)} merged, {refused} borderline pairs kept separate, "
-        f"{judged} judged)",
-        kind="ok",
+        f"{judged} judged); {calibration}",
+        kind="ok" if active.calibrated else "warn",
         concepts=len(concepts),
         concept_nodes=[c.model_dump() for c in concepts],
         decisions=[d.to_dict() for d in decisions],
         cost=cost,
+        thresholds={"model": model_id, "auto": active.auto,
+                    "maybe": active.maybe, "calibrated": active.calibrated},
     )
