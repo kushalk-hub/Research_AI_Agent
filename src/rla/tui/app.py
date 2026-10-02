@@ -205,6 +205,10 @@ class SelectorPanel(_StateView):
         super().__init__(state, "selector")
         self.available_models = list(available_models)
         self.router: Any = None
+        #: Own flag, mirrored to the Textual `display` style. `display` reads
+        #: back through the reactive layer, so toggling must never depend on
+        #: reading it -- flip this and assign, the HelpPanel pattern.
+        self.selector_visible = False
         self.display = False
         if router is not None:
             self.attach_router(router)
@@ -239,7 +243,8 @@ class SelectorPanel(_StateView):
         self.select(role, order[(index + 1) % len(order)])
 
     def toggle(self) -> None:
-        self.display = not self.display
+        self.selector_visible = not self.selector_visible
+        self.display = self.selector_visible
 
     def refresh_state(self) -> None:
         self._show(

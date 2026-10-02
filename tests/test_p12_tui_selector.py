@@ -314,3 +314,31 @@ async def test_the_routing_bar_is_visible_in_a_full_frame():
         console.print(app.screen._compositor)
         frame = console.file.getvalue()
     assert STRUCTURED in frame
+
+
+async def test_m_hides_and_shows_the_selector_in_the_frame():
+    """Ground truth for the `m` binding: the panel's rows must actually leave
+    and re-enter the composed 80-column frame, not just flip a flag."""
+    import io
+
+    from rich.console import Console
+
+    app = RlaApp(state(), _stream([]))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+
+        def frame() -> str:
+            console = Console(file=io.StringIO(), width=80, no_color=True,
+                              legacy_windows=False)
+            console.print(app.screen._compositor)
+            return console.file.getvalue()  # type: ignore[union-attr]
+
+        assert "Models (session only)" not in frame()
+
+        await pilot.press("m")
+        await pilot.pause()
+        assert "Models (session only)" in frame()
+
+        await pilot.press("m")
+        await pilot.pause()
+        assert "Models (session only)" not in frame()
