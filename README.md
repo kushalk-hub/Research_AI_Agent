@@ -43,6 +43,10 @@ Clone first (see Installation above), then note: `data/graph/` is gitignored, so
 `rla build` before `rla eval` / `rla ask` (both fail with `FileNotFoundError` /
 "no graph" otherwise).
 
+Committed data can also drift: a fresh clone's first graph build is blocked until
+`rla status --prune` (observed 0 matched / 26 stale / 30 missing) — see
+[Data and status operations](#data-and-status-operations).
+
 ## Environment configuration
 
 1. Copy the template: `Copy-Item .env.example .env`
@@ -149,10 +153,10 @@ Verified against `src/rla/cli.py`. Prompts interactively for `-t` when omitted (
 | `rla sources [--probe "q"] [--cache/--no-cache]` | probe each source API (bypasses cache by default) | no |
 | `rla stats` | corpus + graph summary tables | no |
 | `rla events` | print the 10 pipeline phases in order | no |
-| `rla build -t "Topic" [--jsonl] [--structured-model M] [--answer-model M]` | acquisition only (40–100 papers) | no |
+| `rla build -t "Topic" [--jsonl] [--structured-model M] [--answer-model M]` | full pipeline **without a question**: acquisition → extract → resolve → graph (40–100 papers; traverse/answer skipped). Keyless, it stops after acquisition | degrades without a key |
 | `rla run -t "Topic" [-q "Q"] [--jsonl] [--structured-model M] [--answer-model M]` | full pipeline, streaming events | degrades without a key |
 | `rla ask "Q" [--markdown] [--jsonl]` | answer from the built graph; no re-acquisition | yes, for the answer |
-| `rla report [--markdown] [--jsonl]` | per-paper limitations + synthesized gaps; costs no LLM calls | no |
+| `rla report [--jsonl]` | per-paper limitations + synthesized gaps; costs no LLM calls. Markdown is the default output (`--markdown` defaults true; there is no `--no-markdown`); `--jsonl` emits the whole report as one JSON document | no |
 | `rla status [--prune]` | corpus/store/graph agreement; `--prune` deletes stale+superseded | no |
 | `rla calibrate-merges` | propose (not install) a merge threshold for the embedding model | yes (embeddings) |
 | `rla eval` | evaluation report → `data/eval/report.md` + `results.json` | no |

@@ -81,7 +81,7 @@ rla doctor [--llm/--no-llm]              # config, sources, cache; --llm probes 
 rla sources [--probe "query"] [--cache/--no-cache]  # is each source actually answering right now?
 rla stats                                  # corpus + graph summary tables
 rla events                                 # the 10 phases, in order
-rla build  -t "Topic" [--jsonl] [--structured-model M] [--answer-model M]  # acquisition only
+rla build  -t "Topic" [--jsonl] [--structured-model M] [--answer-model M]  # full pipeline, no question
 rla run    -t "Topic" [-q "Q"] [--jsonl] [--structured-model M] [--answer-model M]  # full pipeline
 rla ask     "Q" [--markdown] [--jsonl]    # answer from the built graph
 rla report  [--markdown] [--jsonl]        # limitations + synthesized gaps
@@ -95,7 +95,11 @@ Notes that save time:
 
 - `--jsonl` exists on `run`, `build`, `ask` and `report`. On `run`/`build` it emits **one JSON
   object per event, as it happens**. On `report` it emits the whole report as one JSON document.
-- `build` and `run` prompt for a title if you omit `-t`, so both work interactively.
+- `build` is the full pipeline **without a question**: acquisition → extract → resolve →
+  graph, with TRAVERSE/ANSWER skipped (no question to traverse or answer). Keyless, it stops
+  after acquisition — extraction needs an LLM, so no concepts means no graph.
+- `build`, `run`, and `tui` prompt for a title if you omit `-t`, so all three work
+  interactively.
 - `ask` takes the question as a **positional argument**, not `-q`.
 - `report` costs nothing — every claim comes from a stored extraction or a graph edge.
 - `doctor --llm` is deliberately **uncached**: a cache-first probe would report a stale green from a

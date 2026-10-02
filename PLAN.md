@@ -125,7 +125,7 @@ src/rla/
 ├─ store/{cache.py, extraction_store.py, graph_store.py}
 ├─ tui/{app.py, state.py}    Kiro-style terminal UI (§2 L5, §8)
 ├─ eval/{ground_truth,metrics,baseline_rag,judge,gap_validity,run_eval}.py   (§10)
-└─ cli.py                    typer entrypoint (10 commands)
+└─ cli.py                    typer entrypoint (12 commands)
 ```
 
 ---
@@ -486,7 +486,9 @@ experiment #4 (full-text vs abstract-only extraction quality) which justifies th
 
 ## 6. Commands
 
-Ten commands. `--jsonl` gives machine-readable output on `run`, `build`, `ask`, and `report`.
+Ten commands (dated: the CLI now has 12 — `status` and `calibrate-merges` were added later;
+see README "CLI reference"). `--jsonl` gives machine-readable output on `run`, `build`, `ask`,
+and `report`.
 
 | Command | Reads | Needs a key? |
 |---|---|---|
@@ -494,7 +496,7 @@ Ten commands. `--jsonl` gives machine-readable output on `run`, `build`, `ask`, 
 | `rla sources [--probe Q] [--cache]` | probes every source against a throwaway cache DB | no |
 | `rla stats` | stored corpus + built graph summary | no |
 | `rla events` | the 10 pipeline phases, in order | no |
-| `rla build -t "…"` | acquisition only (P1) | no — keyless sources |
+| `rla build -t "…"` | acquisition only (P1) — dated: `build` is now the full pipeline without a question (README "CLI reference") | no — keyless sources |
 | `rla run -t "…" [-q "…"]` | full pipeline, streams `Event`s | optional (degrades) |
 | `rla ask "…"` | `data/graph/graph.json` only; no re-acquisition | for the narrative |
 | `rla report` | corpus + extractions + graph | no — every claim traces to a stored extraction |
@@ -546,7 +548,9 @@ cleanly, which is the half of the product that currently works.
 How to reproduce each claim above. All of these run against the venv.
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest tests/ -q      # 529 passed in ~68s
+.\.venv\Scripts\python.exe -m pytest tests/ -q      # 529 passed in ~68s — dated at the time
+                                                    # (2026-10-01 baseline); current dated
+                                                    # baseline: 668 passed in ~81s
 .\.venv\Scripts\python.exe -m ruff check src/ tests/
 rla doctor                                          # config, sources, cache
 rla doctor --llm                                    # live: all three models reachable

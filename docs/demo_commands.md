@@ -55,11 +55,16 @@ otherwise fails silently as "zero results".
 
 ---
 
-## 4. Acquire a corpus (network, no key) ✅ works now
+## 4. Build without a question (network; keyless = acquisition only) ✅ works now
 
 ```powershell
 rla build -t "Graph Attention Networks"
 ```
+
+`build` is the full pipeline **without a question**: acquisition → extract → resolve →
+graph; the `traverse`/`answer` phases are skipped because no question was supplied.
+Keyless (no `GEMINI_API_KEY`), it stops after acquisition — extraction needs an LLM, so
+there are no concepts to graph.
 
 Fans out across all sources, dedupes by DOI and title, and writes `data/corpus.json`.
 Takes a minute or two. Prints per-source yield.
@@ -173,7 +178,9 @@ rla tui -t "Graph Attention Networks" -q "How did GAT evolve?"
 ```
 
 Live status strip, colour-coded event log, traversal tree, streamed answer panel.
-Keys: `q` quit, `c` clear log.
+Keys: `q` quit, `c` clear log, `m` toggle the model selector, `e` cycle the
+structured-role model, `a` cycle the answer-role model, `x` clear session
+overrides, `?` help overlay.
 
 **Requires Windows Terminal**, not legacy conhost. Needs the `tui` extra.
 

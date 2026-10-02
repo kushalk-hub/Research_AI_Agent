@@ -17,16 +17,17 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev,tui]"
 ```
 
-`.env` exists as a copy of `.env.example` with `GEMINI_API_KEY` blank, so the pipeline runs
-in keyless degrade mode (acquisition works, LLM stages are skipped). Fill in the key to
-enable extraction/resolution/answering; `rla doctor --llm` verifies it against the live API.
+Copy `.env.example` to `.env` and fill in your chosen mode's variables (README "Supported
+modes"); a blank `GEMINI_API_KEY` with no usable `ollama/…` role means keyless degrade mode
+(acquisition works, LLM stages are skipped). Fill in a key to enable
+extraction/resolution/answering; `rla doctor --llm` verifies it against the live API.
 
 **Use the venv's tools, not the ones on PATH.** The system Python 3.11 lacks `respx` (so
 `test_p1_acquisition.py` fails to collect) and its `ruff` is 0.1.14, which reports 3 false
 `UP038` hits that vanish under the pinned `ruff>=0.5`. Correct baseline, in the venv:
 
 ```powershell
-python -m pytest tests/ -q          # 425 passed in ~54s
+python -m pytest tests/ -q          # 668 passed in ~81s
 python -m pytest tests/test_p8_gap_validity.py -v   # one module
 python -m ruff check src/           # All checks passed
 ```
@@ -39,7 +40,7 @@ Ruff config: line-length 100, `select = ["E","F","I","UP","B"]`.
 |---|---|---|
 | `rla doctor [--llm]` | config, sources, cache | `--llm` does a live call, deliberately **uncached** |
 | `rla sources` | probes every source against a throwaway cache DB | no |
-| `rla build -t "…"` | acquisition (P1) | no — keyless sources |
+| `rla build -t "…"` | full pipeline without a question (acquisition → extract → resolve → graph; traverse/answer skipped) | degrades — keyless stops after acquisition |
 | `rla ask "…"` | `data/graph/graph.json` only; no re-acquisition | yes for the answer |
 | `rla report` | corpus + extractions + graph | no — every claim traces to a stored extraction |
 | `rla run [--jsonl]` | full pipeline, streams `Event`s | degrades without a key |
@@ -115,9 +116,9 @@ purpose** so eval numbers reproduce. Do not regenerate or reformat them casually
 
 ## Repo noise
 
-`full_test.out`, `run.log`, `results.txt`, `results2.txt`, `test_out.txt`, `test_output.txt`,
-`test_p8_gap.out` are committed scratch output from past runs, not sources. Ignore them; don't
-add more.
+The scratch logs that used to live here — `full_test.out`, `run.log`, `results.txt`,
+`results2.txt`, `test_out.txt`, `test_output.txt`, `test_p8_gap.out` — were committed output
+from past runs, not sources; they were removed in commit `7ee3f51`. Do not add more.
 
 `PLAN.md` is the authoritative spec and gate-by-gate status (it records which milestones are
 "implemented, gate unverified" because of the missing API key). `research-literature-agent-project-final.md`
