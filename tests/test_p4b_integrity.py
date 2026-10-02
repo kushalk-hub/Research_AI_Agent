@@ -235,18 +235,38 @@ def test_prune_leaves_a_healthy_store_untouched(tmp_path):
 
     target = make_corpus("p1")
     store = fill(tmp_path, target.papers)
+    before = store.path.stat().st_mtime_ns
     assert prune_stale(target, store) == []
     assert len(store.all()) == 1
+    assert store.path.stat().st_mtime_ns == before, "a no-op prune must not rewrite the file"
 
 
 def test_the_status_command_reports_a_store_that_agrees(tmp_path, monkeypatch):
+    from rla.store.graph_store import build_graph, save
+
+    target, _store = _seed_corpus_and_store(tmp_path)
+    settings = _settings(tmp_path)
+    graph, _, _ = build_graph(target.papers, [], [])
+    save(graph, settings.graph_json, settings.graph_graphml)
+    monkeypatch.setattr("rla.cli.get_settings", lambda: settings)
+
+    result = CliRunner().invoke(app, ["status"])
+
+    assert result.exit_code == 0
+    assert "the corpus, extraction store and graph agree" in result.stdout
+
+
+def test_status_reports_a_missing_graph_as_its_own_state(tmp_path, monkeypatch):
+    """No graph file is a distinct state, not agreement: the table shows
+    `graph nodes: none` while the store itself is clean."""
     _seed_corpus_and_store(tmp_path)
     monkeypatch.setattr("rla.cli.get_settings", lambda: _settings(tmp_path))
 
     result = CliRunner().invoke(app, ["status"])
 
     assert result.exit_code == 0
-    assert "agree" in result.stdout
+    assert "no graph has been built yet" in result.stdout
+    assert "the corpus, extraction store and graph agree" not in result.stdout
 
 
 def test_status_reports_a_graph_that_does_not_match_the_corpus(tmp_path, monkeypatch):

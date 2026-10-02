@@ -186,6 +186,8 @@ def prune_stale(corpus: Corpus, store: ExtractionStore) -> list[str]:
     report = reconcile(corpus, store)
     doomed = {e.paper_hash for e in report.stale}
     doomed |= {e.paper_hash for e in report.superseded}
+    if not doomed:
+        return []
     labels = [e.paper_id for e in report.stale]
     labels += [f"{e.paper_id}@{e.paper_hash[:8]}" for e in report.superseded]
 

@@ -612,6 +612,8 @@ def status(
         console.print(
             f"[yellow]the graph is missing {len(graph_missing)} corpus paper(s)[/]"
         )
+    elif graph is None:
+        console.print("[yellow]no graph has been built yet - run `rla run` to build one[/]")
     elif not report.missing:
         console.print("[green]the corpus, extraction store and graph agree[/]")
         return
