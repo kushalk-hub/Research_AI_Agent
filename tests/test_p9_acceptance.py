@@ -27,7 +27,12 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / "src" / "rla"
 PROVIDER_SDKS = ("google.genai", "google import genai", "litellm", "openai", "anthropic")
 
 #: The provider implementation layer, where SDK imports belong.
-ADAPTER_MODULES = ("llm/gemini.py", "llm/litellm_backend.py", "llm/embeddings.py")
+ADAPTER_MODULES = (
+    "llm/gemini.py",
+    "llm/litellm_backend.py",
+    "llm/ollama_backend.py",
+    "llm/embeddings.py",
+)
 
 
 def _imports(path: pathlib.Path) -> set[str]:

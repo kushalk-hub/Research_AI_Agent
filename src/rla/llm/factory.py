@@ -15,12 +15,11 @@ from typing import Any
 
 from rla.config import Settings, get_settings
 from rla.llm.embeddings import Embedder
-from rla.llm.gemini import GeminiClient
 from rla.llm.router import ProviderRouter
 from rla.store.cache import Cache, CostTracker
 
 #: Backend names accepted by `RLA_LLM_PROVIDER`.
-BACKENDS = ("gemini", "litellm")
+BACKENDS = ("gemini", "litellm", "ollama")
 
 
 def build_backend(
@@ -28,27 +27,24 @@ def build_backend(
     cache: Cache | None = None,
     tracker: CostTracker | None = None,
 ) -> Any:
-    """Instantiate the configured routing backend.
+    """Instantiate the provider-routing stack.
 
-    LiteLLM is imported lazily by the backend itself, so selecting `gemini` never
-    imports it and the optional extra stays optional.
-
-    `cache` and `tracker` must be threaded through. The backend is what actually
-    performs provider calls, so a backend holding its own empty tracker makes the
-    run's cost report read `$0.00` regardless of what was actually spent -- the
-    exact silent-zero defect this migration was meant to eliminate.
+    Always a `MultiBackend`: one code path regardless of how many providers a
+    configuration actually uses, and the concrete backends behind it are built
+    lazily on first use. `cache` and `tracker` are threaded through because the
+    backend that performs the call is the one that meters it -- a backend holding
+    its own empty tracker makes the cost report read $0.00 regardless of what was
+    spent, which is the silent-zero defect this migration exists to eliminate.
     """
     choice = (settings.llm_provider or "gemini").strip().lower()
-    if choice == "gemini":
-        return GeminiClient(settings, cache, tracker)
-    if choice == "litellm":
-        from rla.llm.litellm_backend import LiteLLMBackend
+    if choice not in BACKENDS:
+        raise ValueError(
+            f"unknown RLA_LLM_PROVIDER {settings.llm_provider!r}; expected one of "
+            f"{', '.join(BACKENDS)}"
+        )
+    from rla.llm.multi import MultiBackend
 
-        return LiteLLMBackend(settings, cache, tracker)
-    raise ValueError(
-        f"unknown RLA_LLM_PROVIDER {settings.llm_provider!r}; expected one of "
-        f"{', '.join(BACKENDS)}"
-    )
+    return MultiBackend(settings, cache, tracker)
 
 
 def build_client(
