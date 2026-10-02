@@ -104,6 +104,33 @@ class GraphCounters(_StateView):
         self._show(Text(self._state.counter_line(self.size.width or None), style="dim"))
 
 
+#: Shortcut help, shown only while `?` is held open. Plain text on purpose: it
+#: names keys and panels, and routing state never belongs here -- the selector
+#: panel that will show configured/override/resolved needs Agent B's
+#: interfaces (`set_override`, `role_models`/`resolved_role`, `on_fallback`)
+#: and is deliberately not built yet.
+HELP_TEXT = (
+    "keys: q quit · c clear log · ? this help\n"
+    "panels: status (phase + clock) · counters · log (wraps, no deltas)"
+    " · tree · answer (deltas + citations)\n"
+    "same event stream as `rla run`; needs Windows Terminal, not conhost"
+)
+
+
+class HelpPanel(Static):
+    """Shortcut help overlay, hidden until `?` toggles it."""
+
+    def __init__(self) -> None:
+        super().__init__(HELP_TEXT, id="help")
+        self.text = HELP_TEXT
+        self.help_visible = False
+        self.display = False
+
+    def toggle(self) -> None:
+        self.help_visible = not self.help_visible
+        self.display = self.help_visible
+
+
 def build_tree(node: TreeNode | None) -> RichTree:
     """Turn the reducer's `TreeNode` into the `rich.tree.Tree` the gate names."""
     if node is None:
@@ -130,6 +157,7 @@ class RlaApp(App[None]):
     Screen { layout: vertical; }
     #status { height: 1; background: $panel; color: $text; }
     #counters { height: 1; color: $text-muted; }
+    #help { height: auto; max-height: 5; border: round $primary; }
     #body { height: 1fr; }
     /* The log carries the run's narrative, so it gets the larger share; 3fr/2fr
        left the log at 23 columns on an 80-column terminal, which truncated every
@@ -143,6 +171,7 @@ class RlaApp(App[None]):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("c", "clear", "Clear log"),
+        Binding("question_mark", "toggle_help", "Help"),
     ]
 
     def __init__(self, state: PipelineState, events: Any = None) -> None:
@@ -152,6 +181,7 @@ class RlaApp(App[None]):
         self._stream = events
         self.status_bar: StatusBar | None = None
         self.counters: GraphCounters | None = None
+        self.help_view: HelpPanel | None = None
         #: Named `log_view` because `App.log` is a Textual property; assigning to
         #: it raises, which is the sort of thing worth catching at import time.
         self.log_view: RichLog | None = None
@@ -164,6 +194,8 @@ class RlaApp(App[None]):
         yield self.status_bar
         self.counters = GraphCounters(self.state)
         yield self.counters
+        self.help_view = HelpPanel()
+        yield self.help_view
         with Horizontal(id="body"):
             # `min_width` defaults to 78, wider than this panel, so the log was
             # rendered at 78 columns and then hard-cut by the border -- messages
@@ -258,3 +290,7 @@ class RlaApp(App[None]):
     def action_clear(self) -> None:
         if self.log_view is not None:
             self.log_view.clear()
+
+    def action_toggle_help(self) -> None:
+        if self.help_view is not None:
+            self.help_view.toggle()

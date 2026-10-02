@@ -262,7 +262,17 @@ class PipelineState:
         if width and len(full) + 5 + len(clock) > width:
             if len(compact) + 2 + len(clock) <= width:
                 return f"{compact}  {clock}"
-            return compact
+            if len(compact) <= width:
+                return compact
+            # Very narrow terminal: name the current phase only, so the strip
+            # degrades to `>ans  12s` instead of overflowing its single row
+            # and clipping mid-phase.
+            abbrev = _abbreviate(str(self.phase)) if self.phase is not None else "—"
+            minimal = f"{_MARKERS['active']}{abbrev}  {clock}"
+            if len(minimal) <= width:
+                return minimal
+            short = f"{_MARKERS['active']}{abbrev}"
+            return short[:width] if len(short) > width else short
         return f"{full}   |   {clock}"
 
     #: Counters worth the scarce space on one line, most important first. The
