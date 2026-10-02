@@ -20,6 +20,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from rla.llm.base import LLMError
+from rla.llm.errors import ProviderError
 from rla.store.cache import RateLimiter
 
 T = TypeVar("T")
@@ -253,6 +254,13 @@ async def call_with_retry(
                 return await asyncio.wait_for(asyncio.to_thread(fn), timeout)
             return await asyncio.to_thread(fn)
         except Exception as exc:  # SDK raises a broad family of errors
+            if isinstance(exc, ProviderError):
+                # Already categorized by the backend that raised it. Wrapping it
+                # in a bare LLMError would discard the category -- the same defect
+                # the daily-quota and retry-exhaustion paths below guard against --
+                # so it passes through unchanged. `ProviderError` subclasses
+                # `LLMError`, so every existing `except LLMError` handler still holds.
+                raise
             if not retryable(exc):
                 raise LLMError(f"{stage}: {exc}") from exc
             if is_daily_quota(exc):

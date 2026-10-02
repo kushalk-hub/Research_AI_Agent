@@ -115,6 +115,16 @@ class Settings(BaseSettings):
     #: Bound a single provider attempt. Previously no provider call had any
     #: bound: `request_timeout_seconds` only ever applied to source HTTP.
     llm_timeout_seconds: float = Field(default=120.0, gt=0.0)
+    #: Native Ollama endpoint. No `/v1` and no `/api` -- the backend appends the
+    #: path it needs, because the two routes are different: `/api/generate`
+    #: grammar-constrains structured output, while the OpenAI-compatible
+    #: `/v1/chat/completions` route only prefills format instructions into the
+    #: prompt and measured ~12x slower for the same schema.
+    ollama_url: str = "http://localhost:11434"
+    #: Whether a reasoning model emits its thinking before the answer. Off by
+    #: default: free-form thinking interleaved with a grammar constraint asks for
+    #: trouble, and measurement showed it costs essentially nothing here.
+    ollama_think: bool = False
 
     # --- Optional sources --------------------------------------------------
     serpapi_api_key: str = ""
