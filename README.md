@@ -1,4 +1,4 @@
-# rla — Graph-Based Research Literature Agent
+# FODS Research Agent: From Question to Evidence-Backed Brief
 
 Ingests papers on a research topic, builds a citation-and-concept graph, and traverses
 that graph to answer lineage questions ("how did technique X evolve?") and gap questions
@@ -8,8 +8,31 @@ This README is an operational document: how to install, configure, verify, run, 
 diagnose `rla`. Design rationale lives in `docs/` and the ADRs (see Documentation map);
 this file links to those rather than duplicating them.
 
+The repository also includes a separate `fods` runtime demo. It reuses selected `rla`
+source and model interfaces while owning task validation, readiness, scheduling, traces,
+and citation-gated output. See the [architecture and demo plan](docs/implementation_architecture_and_demo_plan.md)
+and [demo commands](docs/demo_commands.md).
+
 > **Entry point:** the `rla` console script. `python -m src.rla.cli` does **not** work
 > (src-layout package; the import name is `rla`).
+
+> The FODS demo can be run with `python -m fods.cli` or the installed `fods` command.
+
+## FODS browser visualizer
+
+Start the local interactive interface from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m fods.cli serve --host 127.0.0.1 --port 8765
+```
+
+Then open <http://127.0.0.1:8765/>. The interface provides Overview, Execution, FODS Lab,
+Evidence & Answer, and Runs & Replay views. Deterministic simulation uses fixture papers and
+does not call Gemini. For live runs, select live mode; provider credentials remain in the Python
+process. Gemini answers require a configured key and the explicit `RLA_FODS_ALLOW_GEMINI=1`
+opt-in before starting the server. Replay reads saved events without invoking models or sources.
+The server binds to loopback by default and writes briefs only under `data/fods/briefs/` using a
+new filename.
 
 ---
 
@@ -67,6 +90,7 @@ Only these three configurations are supported by the code:
 |---|---|---|---|
 | Fully local | `ollama/…` in all roles | `ollama/nomic-embed-text` (768 dims) | No |
 | Ollama + cloud hybrid | `ollama/…` for text | Gemini embedder | Yes (embeddings still go through Gemini) |
+| FODS research demo | Qwen/Ollama for structured roles; Gemini for final answer | Ollama embedder | Yes (final answer only) |
 | Cloud / fallback | Gemini (native) or second provider via LiteLLM `[router]` extra | `gemini-embedding-001` | Yes |
 
 With a blank `GEMINI_API_KEY` and no usable `ollama/…` role, the pipeline runs in

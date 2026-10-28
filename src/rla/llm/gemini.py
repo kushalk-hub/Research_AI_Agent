@@ -78,6 +78,12 @@ class GeminiClient:
             return "embedding" not in model
         return False
 
+    @staticmethod
+    def _sdk_model(model: str) -> str:
+        """Convert the router's canonical provider/model id to Google's model id."""
+        provider, separator, model_id = model.partition("/")
+        return model_id if separator and provider == "gemini" else model
+
     # -- properties --------------------------------------------------------
     @property
     def fast_model(self) -> str:
@@ -129,8 +135,12 @@ class GeminiClient:
 
         config = self._config(schema, temperature)
 
+        sdk_model = self._sdk_model(model)
+
         def _invoke() -> Any:
-            return self.client.models.generate_content(model=model, contents=prompt, config=config)
+            return self.client.models.generate_content(
+                model=sdk_model, contents=prompt, config=config
+            )
 
         try:
             response = await call_with_retry(
@@ -212,7 +222,7 @@ class GeminiClient:
 
         def _iter() -> Any:
             return self.client.models.generate_content_stream(
-                model=model or self.strong_model,
+                model=self._sdk_model(model or self.strong_model),
                 contents=prompt,
                 config=self._config(None, temperature),
             )

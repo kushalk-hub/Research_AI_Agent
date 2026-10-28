@@ -62,6 +62,19 @@ def test_the_canonical_id_decides_the_backend_not_the_default(tmp_path):
     assert m.provider_for("gpt-4o-mini") == "openai"
 
 
+def test_native_gemini_backend_strips_routing_prefix_for_sdk(tmp_path):
+    """Google's SDK expects a model name, not our ``provider/model`` route id."""
+    settings = Settings(
+        _env_file=None,
+        gemini_api_key="k",
+        data_dir=tmp_path,
+        raw_dir=tmp_path / "raw",
+        graph_dir=tmp_path / "graph",
+    )
+    client = GeminiClient(settings)
+    assert client._sdk_model("gemini/gemini-2.5-flash") == "gemini-2.5-flash"
+
+
 def test_an_unknown_provider_resolves_to_nothing_rather_than_a_guess(tmp_path):
     with pytest.raises(ModelResolutionError):
         multi(tmp_path).provider_for("foo/bar")

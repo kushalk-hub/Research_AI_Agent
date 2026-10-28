@@ -1,4 +1,4 @@
-# Fundamentals of Data Structures Course Project — Master Plan
+# FODS Research Agent: From Question to Evidence-Backed Brief
 
 ## 1. Project context and academic purpose
 
@@ -10,9 +10,9 @@ The team will combine its existing understanding of LLM-based agents—reasoning
 
 ## 2. Project description
 
-The team will build a compact, traceable agent runtime. A user gives a natural-language request inside a restricted workspace. An LLM proposes a structured task plan. The project’s own runtime then validates the plan, schedules eligible tasks, calls safe tools, records all state transitions, applies a bounded retry/replanning policy when an operation fails, and produces a final response.
+The team will build a fast research-paper agent with an observable FODS runtime. Given a research question, Qwen proposes a structured plan with independent academic-source tasks. The runtime validates the plan, detects cycles, schedules ready tasks, collects and stores reusable evidence, and controls the execution. Qwen can enrich context after it is answerable; Gemini synthesizes the selected evidence into a cited answer; the runtime validates citations and saves the brief only to an explicitly named file inside the approved workspace.
 
-The preferred presentation is a lightweight web dashboard. It will display the proposed task/dependency graph and an inspectable execution trace, inspired by the transparency of developer tools such as Google ADK and DeepSeek Harness. A command-line presentation remains an acceptable implementation alternative if it better fits the development timeline; the runtime must not depend on the chosen interface.
+The presentation shows the actual task graph, ready queue, task states, source calls, trace, citation-validation decision, and output result. It distinguishes live source execution, deterministic simulated execution, and replay of a recorded event log. The local browser visualizer and CLI/TUI consume the same runtime events; the browser does not own scheduling or credentials.
 
 ## 3. Problem statement
 
@@ -23,10 +23,10 @@ The problem is to design and implement a safe, limited-scope agent runtime in wh
 ## 4. Objectives
 
 1. Apply FODS concepts as real runtime components rather than decorative labels.
-2. Build a working demonstration that accepts an LLM-assisted structured plan and executes a controlled file-based workflow.
+2. Build a working demonstration that accepts an LLM-assisted structured plan and executes a bounded research workflow with controlled source tools and an explicitly scoped output-file tool.
 3. Make task dependencies, scheduling, state transitions, tool calls, errors, and retries inspectable.
 4. Demonstrate why each selected structure or algorithm is appropriate through repeatable scenarios.
-5. Keep the first assessment feasible before the 20th, while retaining a clear path to sequential and parallel multi-agent execution for the final version.
+5. Deliver a fast first answerable context from a small, bounded paper set; enrich it incrementally instead of blocking on one LLM extraction per paper.
 
 ## 5. Agreed approach
 
@@ -35,27 +35,30 @@ The problem is to design and implement a safe, limited-scope agent runtime in wh
 | Component | Responsibility |
 | --- | --- |
 | LLM API | Interpret the request and propose a structured plan, task dependencies, tool choices, priorities, and expected outputs. |
-| Project runtime | Validate the plan, reject invalid dependency cycles, determine which tasks are ready, schedule and execute them, manage task state, record trace events, enforce retry limits, and decide when to reply or report failure. |
-| Safe tools | List/read workspace files, search text within them, and write or update only explicitly named files in the approved workspace. |
-| Interface | Show the plan graph and execution trace. A web dashboard is preferred; CLI remains possible. |
+| Project runtime | Validate plans and tool arguments, reject cycles before tools run, schedule source tasks, manage states and traces, enforce retry limits, validate citations, and gate output writes. |
+| Research tools | Search one academic source per task, normalize/deduplicate records, retrieve evidence from saved context, and preserve provenance/citation links. The runtime controls dispatch; no hidden multi-source scheduler lives inside a tool. |
+| Workspace output tool | Save a cited brief only to an explicitly named path resolved inside the approved workspace, and only after citation validation passes. |
+| Interface | Show the plan graph, queue, source calls, context reuse, citation checks, and trace from the shared event stream. |
 
 The key principle is: **the LLM suggests; the FODS runtime governs.**
 
 ### 5.2 Core runtime flow
 
 ```text
-Request
-  → LLM proposes a structured plan
-  → validate tasks and dependencies
-  → detect cycles and calculate ready tasks
-  → schedule ready tasks
-  → execute an LLM action or safe tool
-  → record event, output, and task state
-  → retry/replan within a fixed limit if needed
-  → return final response or a clear failure result
+Research question
+  → Qwen proposes structured source tasks
+  → validate task/tool arguments and dependencies
+  → detect cycles and calculate readiness
+  → FODS scheduler dispatches independent source tasks
+  → normalize, deduplicate, persist reusable evidence context
+  → optionally enrich context with bounded Qwen extraction after first context is ready
+  → retrieve selected evidence and ask Gemini for the cited answer
+  → validate citations against selected evidence
+  → save only after validation, or record failure/recovery
+  → return answer and a clear run result
 ```
 
-The initial plan graph should be acyclic. Reflection and retries are runtime transitions, not unbounded dependency cycles. Every retry must have a maximum number of attempts and a visible termination reason.
+The plan graph must be acyclic. Retries/replanning are bounded runtime transitions, not dependency cycles. Every retry has a maximum attempt count and a visible termination reason. Citation validation is a prerequisite of the output-file task; failed validation cannot result in a success-marked brief.
 
 ### 5.3 Data structures and algorithms
 
@@ -66,7 +69,7 @@ The project will choose structures based on the problem, rather than forcing a f
 | Directed graph / DAG | Store task dependencies and enable sequential, branching, and eventual parallel work. |
 | Cycle detection and topological ordering | Reject invalid dependency plans and identify tasks whose prerequisites are complete. |
 | Queue | Hold ready tasks under a simple FIFO scheduling policy. |
-| Priority queue / heap | Optional alternative scheduler for ready tasks when an explicit priority rule is justified. |
+| Priority queue / heap | Compare with FIFO using a simple, fixed priority rule on the same ready tasks. |
 | Stack / trace tree | Represent nested agent/model/tool activity, error returns, and execution history. |
 | Hash map / dictionary | Index task state, outputs, retry counters, registered tools, and trace events by identifier. |
 
@@ -85,50 +88,56 @@ Failures will be recorded with the tool/action, error details, attempt count, an
 
 ## 6. Demonstration scope
 
-### First assessment demo
+### Proposed first assessment demo — From research question to evidence-backed brief
 
-The first demo will use one orchestrator and a controlled request such as:
+1. Qwen proposes a structured research plan with independent academic-source tasks.
+2. The FODS runtime validates the plan, rejects cycles, and schedules source tasks using its own DAG, readiness algorithm, and queue.
+3. Source results are normalized, deduplicated, and persisted with metadata, abstracts, provenance, and citation links.
+4. A follow-up question retrieves supporting evidence and produces a cited answer. Citations are checked against the evidence selected for the answer.
+5. The runtime validates and saves the cited brief to an explicitly named file inside the approved workspace.
+6. The demo repeats the question using saved context, then demonstrates FIFO vs priority scheduling, cycle rejection, and bounded failure recovery.
 
-> Receive a project request → plan subtasks → inspect files → generate or update a safe output file → reply with the result.
+The demo distinguishes live source execution, deterministic simulated execution, and replay of a recorded event log. Replay proves event reproducibility, not live scheduler concurrency. If citation validation fails, the brief is not reported as successfully saved and validated; the trace records the failure and chosen recovery action.
 
-The tool scope will be limited to the approved workspace: list/read files, optional text search, and write/update of an explicitly named file. Every tool call will be traced. Actions should be reversible where practical.
+The initial context is bounded and answerable from abstracts/citation metadata. Concept extraction is incremental and resumable; first-answer generation does not wait on one model extraction per paper.
 
 ### Final expansion
 
-The intended final direction is a central orchestrator that supervises specialist worker agents. It should support both sequential dependencies and independent tasks that can run in parallel. The central orchestrator remains responsible for validation, scheduling, trace collection, retry policy, and final aggregation.
+Later expansion may add full-text extraction, broader evidence sets, and additional source adapters. The same FODS runtime remains responsible for validation, scheduling, trace collection, retry policy, citation checks, and final aggregation.
 
 ## 7. Demonstration and evaluation scenarios
 
 The demonstration script should include these repeatable cases:
 
-1. **Normal workflow:** dependent tasks such as read → summarize → write output; show graph and topological execution order.
-2. **Parallel-ready work:** two independent tasks become ready, then their results join in a final task.
-3. **Scheduling comparison:** run the same ready tasks under FIFO and one clearly defined priority rule; explain the changed order.
-4. **Invalid plan:** create a cyclic dependency and show rejection before any tool is called.
-5. **Controlled failure:** simulate a missing file or tool error; show the trace, retry/replanning limit, and final result.
+1. **Normal research workflow:** source search → merge/context → retrieve → cite-check → save brief; show graph and topological order.
+2. **Parallel-ready sources:** independent academic-source tasks run under the runtime scheduler, then join at normalization/context persistence.
+3. **Scheduling comparison:** run the same ready tasks under FIFO and a fixed static-priority rule; explain the changed order.
+4. **Invalid plan:** create a cyclic dependency and show rejection before any source or file tool is called.
+5. **Controlled failure:** simulate a source/tool failure; show attempts, bounded retry/replanning, blocked dependents, and final reason.
+6. **Citation guard:** force a citation absent from selected evidence; show validation failure and that the output write is not marked successful.
 
-Assessment evidence should prioritize correct behavior and clear explanations over raw speed benchmarks. A small baseline comparison—for example, a linear task list versus an explicit dependency graph, or FIFO versus a priority queue—is recommended when it helps explain a chosen structure.
+Assessment evidence should show correct behavior and explain the selected structures. Report measured time to first context and answer separately from model-load time; do not substitute raw token-generation speed for workflow timing. The FIFO/priority comparison is a required repeatable scenario.
 
 ## 8. Milestone plan
 
 | Milestone | Target outcome |
 | --- | --- |
 | Planning and research | This master plan, source-backed research, scenario list, and data-structure mapping. |
-| First assessment, before the 20th | One orchestrator, LLM chat/plan proposal, restricted file tools, graph validation, task states, trace view, and bounded retry demonstration. |
-| Final project | Sequential and parallel worker-agent execution, mature visual inspection, scheduling comparison, and a complete course-focused explanation/report. |
+| First assessment | LLM-proposed plan, runtime-owned source-task scheduling, fast reusable evidence context, cited answer, guarded output write, graph/queue/trace visualization, FIFO-vs-priority comparison, cycle rejection, and bounded recovery. |
+| Later expansion | Optional full-text enrichment, broader corpora, more source adapters, and improved visualization after the vertical slice is measured. |
 
 Team roles are intentionally flexible. Work may be shared across runtime/data structures, LLM and tool integration, visualization, test scenarios, and documentation, with regular integration review.
 
 ## 9. Decisions deliberately deferred
 
-The following are not finalized and should be chosen only after the architecture is converted into an implementation plan:
+The following implementation parameters remain to be measured or finalized:
 
-- LLM provider and model (OpenRouter, free model, or another option).
-- Implementation language(s), including whether Python handles the agent/API layer and whether C++ is used for selected engine components.
-- Web dashboard versus CLI for the first working interface.
-- Exact scheduler priority formula and whether a priority queue is needed in the first demo.
-- Exact retry count, timeout, and replanning policy.
-- Final number and specialization of worker agents.
+- Initial paper cap and first-context latency on the presentation machine.
+- Static priority values used in the scheduler comparison.
+- Retry/timeout limits for each source tool and whether one bounded replan is enabled.
+- The current interactive browser view is implemented. Further UI polish is optional and must not add a second scheduler or claim unimplemented concept extraction.
+
+The first vertical slice now uses a standalone, offline HTML run view generated from the same event log. Live data performance and the presentation-machine paper cap still require rehearsal measurements.
 
 ## 10. Research findings and existing-system references
 

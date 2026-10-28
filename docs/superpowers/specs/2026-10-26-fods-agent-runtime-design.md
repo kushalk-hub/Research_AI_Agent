@@ -1,5 +1,12 @@
 # FODS Agent Runtime (`fods-core`) — Design
 
+> **Superseded scope note (2026-10-28):** the project master is now
+> [`../../master.md`](../../master.md), with the research-to-brief scope. The
+> approved implementation specification is
+> [`../../implementation_architecture_and_demo_plan.md`](../../implementation_architecture_and_demo_plan.md).
+> The generic file-agent and clean-rebuild decisions below are historical draft
+> proposals; do not use them as the active scope.
+
 **Date:** 2026-10-26
 **Status:** Draft for team review
 **Inputs:** `docs/master.md` (target definitions), `docs/research.md` (cited patterns),

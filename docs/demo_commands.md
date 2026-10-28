@@ -10,6 +10,101 @@ quota is marked, and what you will actually see is stated.
 
 ---
 
+## FODS research-to-brief demo
+
+### Interactive browser visualizer
+
+Start the local UI from the repository root, then open `http://127.0.0.1:8765/`:
+
+```powershell
+python -m fods.cli serve --host 127.0.0.1 --port 8765
+```
+
+The interface has five views: Overview (start a run and see its lifecycle), Execution (live event
+timeline and source lanes), FODS Lab (DAG, queue, task states, and trace stack), Evidence & Answer
+(selected papers, citations, validation, and saved brief), and Runs & Replay (history and offline
+event replay). The browser uses the Python API and SSE stream; it does not call providers directly.
+Simulation is fixture-backed and deterministic. To enable Gemini answers for live mode only, set
+`RLA_FODS_ALLOW_GEMINI=1` in the shell **before starting the server** after the key is configured
+in `.env`. The environment variable is an explicit opt-in gate, not the API key itself.
+
+Run the failure and scheduler demonstrations from FODS Lab, or use the CLI examples below. Replay
+does not contact a model or source and therefore cannot prove live concurrency.
+
+The `fods` runtime owns task readiness and dispatch. Use `simulate` for repeatable fixture calls,
+`live` for one request per academic source, and `replay` to render a saved event log without
+executing tools. These are three different kinds of evidence; replay is not evidence of live
+concurrency.
+
+```powershell
+# Fast, repeatable keyless run; prints the task plan and live event sequence.
+python -m fods.cli run `
+  --topic "Graph Attention Networks" `
+  --question "How did graph attention use local neighborhoods?" `
+  --output "data/fods/briefs/gat-first.md" `
+  --mode simulate --planner fixture --concurrency 3
+
+# Ask another question using the stored context, with a new explicit output path.
+python -m fods.cli run `
+  --topic "Graph Attention Networks" `
+  --question "What changes in graph transformers?" `
+  --output "data/fods/briefs/gat-followup.md" `
+  --mode simulate --planner fixture --reuse-context
+
+# Local Qwen planner; in simulate mode the answer stays deterministic and does not call Gemini.
+$env:RLA_STRUCTURED_MODEL = "ollama/qwen3:4b"
+$env:RLA_ANSWER_MODEL = "gemini-2.5-flash"
+
+# After configuring GEMINI_API_KEY in the ignored local .env and approving the config gate,
+# opt in to the Gemini final-answer call in this PowerShell session:
+$env:RLA_FODS_ALLOW_GEMINI = "1"
+
+# Live mode: Qwen proposes the plan, each source is its own FODS task, Gemini answers.
+python -m fods.cli run `
+  --topic "Graph Attention Networks" `
+  --question "How did graph attention use local neighborhoods?" `
+  --output "data/fods/briefs/gat-live.md" `
+  --mode live --planner ollama --concurrency 3 --fresh-sources
+
+# Compare the same simulated ready set under FIFO and fixed static priorities.
+# Use one worker so the dequeue-order difference is visible.
+python -m fods.cli run `
+  --topic "Graph Attention Networks" `
+  --question "How did graph attention use local neighborhoods?" `
+  --output "data/fods/briefs/gat-fifo.md" `
+  --mode simulate --planner fixture --schedule fifo --concurrency 1
+python -m fods.cli run `
+  --topic "Graph Attention Networks" `
+  --question "How did graph attention use local neighborhoods?" `
+  --output "data/fods/briefs/gat-priority.md" `
+  --mode simulate --planner fixture --schedule priority --concurrency 1
+
+# Acceptance demonstrations: each returns a non-zero exit code and does no unsafe write.
+python -m fods.cli run --topic "Graph Attention Networks" --question "How does attention work?" `
+  --output "data/fods/briefs/cycle.md" --mode simulate --planner fixture --inject-cycle
+python -m fods.cli run --topic "Graph Attention Networks" --question "How does attention work?" `
+  --output "data/fods/briefs/fail.md" --mode simulate --planner fixture `
+  --fail-source arxiv --fail-source openalex
+python -m fods.cli run --topic "Graph Attention Networks" --question "How does attention work?" `
+  --output "data/fods/briefs/bad-citation.md" --mode simulate --planner fixture --invalid-citation
+
+# Render the event file printed by the run command. Replay does not call tools.
+python -m fods.cli replay "data/fods/runs/<run-id>.jsonl"
+```
+
+Live mode continues after at least two academic sources succeed and records unavailable or
+cancelled sources. `--fresh-sources` gives this run an empty dedicated source cache so API calls are
+real network executions; without it, live mode is cache-first. Fewer than two successful sources
+blocks context creation and output.
+
+The output path must be new and workspace-relative. A repeated question should use `--reuse-context`
+and a new output path; the context file and run events live under ignored `data/fods/`. Each run
+also writes a self-contained HTML visualization beside its JSONL event log. It visualizes the DAG
+readiness levels, per-task state, and measured execution lanes from that run. Replaying events may
+recreate the same view, but only live or deterministic simulated execution demonstrates dispatch.
+
+---
+
 ## 1. Zero-setup sanity checks (no key, no network)
 
 Fastest way to confirm the install is healthy.

@@ -7,6 +7,7 @@ data/cache.db
 data/cache.db-journal
 data/raw/
 data/graph/
+data/fods/
 eval/report.md
 __pycache__/
 *.py[cod]

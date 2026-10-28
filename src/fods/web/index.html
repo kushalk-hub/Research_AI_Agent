@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>FODS Research Agent</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#overview" aria-label="FODS Research Agent home">
+        <span class="brand-mark">F</span>
+        <span><strong>FODS Research Agent</strong><small>Runtime Visualizer</small></span>
+      </a>
+      <div class="header-meta">
+        <span id="connection" class="connection pending"><i></i> Connecting</span>
+        <span class="local-badge">Local workspace</span>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Application views">
+      <button class="tab active" data-view="overview">Overview</button>
+      <button class="tab" data-view="execution">Execution</button>
+      <button class="tab" data-view="lab">FODS Lab</button>
+      <button class="tab" data-view="evidence">Evidence & answer</button>
+      <button class="tab" data-view="runs">Runs & replay</button>
+    </nav>
+
+    <main>
+      <section class="view active" id="view-overview" aria-labelledby="overview-title">
+        <div class="page-heading">
+          <div><p class="eyebrow">QUESTION → EVIDENCE → BRIEF</p><h1 id="overview-title">Research run</h1>
+            <p class="subheading">Watch the runtime validate a plan, schedule source calls, build reusable context, and verify cited output.</p></div>
+          <div id="run-status" class="status-pill idle">No active run</div>
+        </div>
+
+        <div class="overview-grid">
+          <form id="run-form" class="panel run-form">
+            <div class="panel-heading"><div><h2>Start a run</h2><p>Live sources use configured providers. Simulation is deterministic and does not call Gemini.</p></div></div>
+            <label for="topic">Research topic</label>
+            <input id="topic" name="topic" required minlength="3" maxlength="300" value="Graph Attention Networks" />
+            <label for="question">Research question</label>
+            <textarea id="question" name="question" required minlength="3" maxlength="1000" rows="3">How did graph attention use local neighborhoods, and what limitations did the original method leave open?</textarea>
+            <div class="form-grid">
+              <div><label for="mode">Execution mode</label><select id="mode"><option value="live">Live research sources</option><option value="simulate" selected>Deterministic simulation</option></select></div>
+              <div><label for="planner">Plan source</label><select id="planner"><option value="auto" selected>Automatic</option><option value="ollama">Qwen via Ollama</option><option value="fixture">Deterministic fixture</option></select></div>
+              <div><label for="concurrency">Worker concurrency</label><input id="concurrency" type="number" min="1" max="8" value="3" /></div>
+              <div><label for="source-limit">Source count</label><input id="source-limit" type="number" min="2" max="5" value="3" /></div>
+              <div><label for="schedule">Ready queue</label><select id="schedule"><option value="fifo">FIFO queue</option><option value="priority">Priority queue</option></select></div>
+              <div><label for="output-name">Brief filename <span class="optional">optional</span></label><input id="output-name" maxlength="80" placeholder="run-name.md" /></div>
+            </div>
+            <div class="reuse-row">
+              <label class="check-label"><input id="reuse-context" type="checkbox" /> Reuse saved topic context</label>
+              <select id="saved-context" aria-label="Saved context" disabled><option value="">Choose saved context</option></select>
+            </div>
+            <div id="mode-note" class="note">Simulation uses fixture papers and deterministic answer drafting. No model API is called.</div>
+            <div class="form-actions">
+              <button id="start-run" type="submit" class="button primary">Start research run</button>
+              <button id="cancel-run" type="button" class="button quiet" disabled>Cancel run</button>
+            </div>
+            <p id="form-error" class="error-text" role="alert"></p>
+          </form>
+
+          <aside class="side-stack">
+            <div class="panel model-panel">
+              <div class="panel-heading"><div><h2>Configured models</h2><p>Run records show which provider actually completed each call.</p></div><span class="tag">SERVER SIDE</span></div>
+              <div class="model-line"><span class="model-icon qwen">Q</span><div><b>Planning / structured</b><small id="planner-model">Loading…</small></div><span id="planner-state" class="model-state">—</span></div>
+              <div class="model-line"><span class="model-icon gemini">G</span><div><b>Answer synthesis</b><small id="answer-model">Loading…</small></div><span id="gemini-state" class="model-state">—</span></div>
+              <p class="privacy-note">Credentials stay in the Python process. The browser receives model names and key-presence status only.</p>
+            </div>
+            <div class="panel metrics-panel">
+              <div class="panel-heading"><div><h2>Run snapshot</h2><p>Values come from the selected run’s event stream.</p></div></div>
+              <div class="metrics-grid">
+                <div><small>First context</small><strong id="metric-context">—</strong></div>
+                <div><small>Answer call</small><strong id="metric-answer">—</strong></div>
+                <div><small>Papers saved</small><strong id="metric-papers">—</strong></div>
+                <div><small>Source coverage</small><strong id="metric-sources">—</strong></div>
+              </div>
+              <div class="progress-caption"><span id="progress-label">Waiting for a run</span><span id="progress-count">0 events</span></div>
+              <div class="progress-track"><div id="progress-bar"></div></div>
+            </div>
+          </aside>
+        </div>
+
+        <div class="pipeline panel">
+          <div class="pipeline-step"><span>01</span><b>Plan</b><small>Qwen or fixture</small></div>
+          <div class="pipeline-step"><span>02</span><b>Validate</b><small>DAG and tools</small></div>
+          <div class="pipeline-step"><span>03</span><b>Schedule</b><small>FODS queue</small></div>
+          <div class="pipeline-step"><span>04</span><b>Gather</b><small>Source tasks</small></div>
+          <div class="pipeline-step"><span>05</span><b>Context</b><small>Normalize and save</small></div>
+          <div class="pipeline-step"><span>06</span><b>Verify</b><small>Answer and citations</small></div>
+          <div class="pipeline-step"><span>07</span><b>Write</b><small>Guarded brief</small></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-execution" aria-labelledby="execution-title">
+        <div class="page-heading"><div><p class="eyebrow">ONE EVENT STREAM</p><h1 id="execution-title">Execution trace</h1><p class="subheading">Select a task or event to synchronize the graph, timeline, and inspector.</p></div><span id="execution-mode" class="tag">No run selected</span></div>
+        <div class="note">The planner returns a structured task plan; it does not issue native model function calls. The runtime validates each planned tool, then records enqueue, dispatch, execution, and return as separate events.</div>
+        <div class="execution-grid">
+          <div class="panel graph-panel"><div class="panel-heading"><div><h2>Agent workflow and task DAG</h2><p>Solid edges are accepted plan dependencies.</p></div><span id="graph-count" class="tag">—</span></div><div id="graph-empty" class="empty">Start or replay a run to populate its real task graph.</div><div id="dag-wrap"><svg id="dag" role="img" aria-label="FODS task dependency graph"></svg></div><div class="graph-legend"><span><i class="dot done"></i>Completed</span><span><i class="dot active"></i>Running</span><span><i class="dot failed"></i>Failed / blocked</span><span><i class="dot waiting"></i>Waiting</span></div></div>
+          <div class="panel inspector"><div class="panel-heading"><div><h2>Selected activity</h2><p>Inputs, output, timing, dependencies, and state.</p></div></div><div id="inspector-content" class="empty">Choose a task or event.</div></div>
+        </div>
+        <div class="panel timeline-panel"><div class="panel-heading"><div><h2>Measured task timeline</h2><p>Intervals use recorded task start and terminal timestamps; replay shows recorded timings.</p></div><span id="timeline-kind" class="tag">—</span></div><div id="timeline" class="timeline"><div class="empty">No task timings recorded.</div></div></div>
+        <div class="panel event-panel"><div class="panel-heading"><div><h2>Chronological runtime events</h2><p>Plan requests, runtime decisions, model calls, tool calls, and state transitions.</p></div><span id="event-total" class="tag">0 events</span></div><div class="event-table-wrap"><table class="event-table"><thead><tr><th>#</th><th>Time</th><th>Event</th><th>Activity</th><th>Message</th></tr></thead><tbody id="event-rows"><tr><td colspan="5" class="empty">No events yet.</td></tr></tbody></table></div></div>
+      </section>
+
+      <section class="view" id="view-lab" aria-labelledby="lab-title">
+        <div class="page-heading"><div><p class="eyebrow">DATA STRUCTURES IN USE</p><h1 id="lab-title">FODS Lab</h1><p class="subheading">Each panel links an implemented runtime operation to the event that proves it happened.</p></div></div>
+        <div class="lab-actions panel"><div><b>Controlled demonstrations</b><small>All three scenarios use deterministic simulated tools and never call Gemini.</small></div><button class="button secondary" id="demo-cycle">Show cycle rejection</button><button class="button secondary" id="demo-failure">Show bounded source failure</button><button class="button secondary" id="demo-citation">Show citation guard</button><button class="button secondary" id="demo-queues">Compare FIFO and priority</button></div>
+        <div class="lab-grid">
+          <article class="panel lab-card"><div class="panel-heading"><div><h2>Directed acyclic graph</h2><p>Task dependencies and topological levels</p></div><span class="tag">KAHN READINESS</span></div><p class="concept-copy">The runtime checks the proposed dependency graph before dispatch. A task enters the ready set when its prerequisites complete; a cycle is rejected before any tool handler runs.</p><div id="dependency-map" class="data-list empty">Waiting for an accepted plan.</div><div id="dependency-events" class="mini-log"></div></article>
+          <article class="panel lab-card"><div class="panel-heading"><div><h2>Ready queue</h2><p>Recorded enqueue and dequeue operations</p></div><span id="queue-policy" class="tag">—</span></div><p class="concept-copy">FIFO preserves insertion order. The heap queue selects the highest fixed priority; insertion order breaks ties.</p><div id="queue-list" class="queue-list empty">No queue operations recorded.</div><div id="queue-comparison" class="compare-grid"></div></article>
+          <article class="panel lab-card"><div class="panel-heading"><div><h2>Task-state map</h2><p>Runtime dictionary indexed by task ID</p></div><span class="tag">task_id → state</span></div><p class="concept-copy">The runtime stores each task’s state, attempt count, output, and error by ID. These rows are read from recorded transition events and accepted plan data.</p><div id="state-map" class="data-list empty">No task state recorded.</div></article>
+          <article class="panel lab-card"><div class="panel-heading"><div><h2>Nested stack and recovery</h2><p>Push, pop, failure, retry, and unwind events</p></div><span id="recovery-status" class="tag">—</span></div><p class="concept-copy">Each executing task owns a trace stack. A failed call records its classification and bounded recovery action; blocked dependents remain visible.</p><div id="stack-list" class="stack-list empty">No stack frames recorded.</div></article>
+        </div>
+        <div class="panel comparison-panel"><div class="panel-heading"><div><h2>Queue comparison from two runtime runs</h2><p>Identical deterministic ready tasks; actual dequeue events from each scheduler.</p></div></div><div id="queue-comparison-detail" class="compare-grid empty">Use “Compare FIFO and priority” to run the same fixture plan under both policies.</div></div>
+      </section>
+
+      <section class="view" id="view-evidence" aria-labelledby="evidence-title">
+        <div class="page-heading"><div><p class="eyebrow">SOURCES → SELECTED EVIDENCE → CITED ANSWER</p><h1 id="evidence-title">Evidence and answer</h1><p class="subheading">Evidence is drawn from returned source records and the saved abstract-based context.</p></div><span id="answer-attribution" class="tag">No answer yet</span></div>
+        <div class="evidence-grid"><div class="panel evidence-panel"><div class="panel-heading"><div><h2>Collected papers</h2><p id="context-meta">No context loaded.</p></div><span id="context-hash" class="tag">—</span></div><div id="papers" class="paper-list empty">Run source tasks or load saved context.</div></div><div class="panel answer-panel"><div class="panel-heading"><div><h2>Answer and citation checks</h2><p>Click a citation marker to inspect its evidence card.</p></div></div><div id="answer-content" class="answer-content empty">The cited answer will appear here.</div><div id="citation-status" class="citation-status">Citation validation has not run.</div><div id="brief-link" class="brief-link"></div></div></div>
+        <div class="panel selected-evidence"><div class="panel-heading"><div><h2>Selected evidence cards</h2><p>Only these cards are allowed to support citations in the answer.</p></div></div><div id="selected-cards" class="paper-list empty">No retrieved evidence yet.</div></div>
+      </section>
+
+      <section class="view" id="view-runs" aria-labelledby="runs-title">
+        <div class="page-heading"><div><p class="eyebrow">RECORDED AND REPLAYABLE</p><h1 id="runs-title">Runs and replay</h1><p class="subheading">Replay reads recorded JSONL events only. It does not call models or sources.</p></div><button id="refresh-history" class="button secondary">Refresh history</button></div>
+        <div class="panel"><div class="panel-heading"><div><h2>Saved execution history</h2><p>Live, simulated, and replay runs have distinct labels.</p></div></div><div class="event-table-wrap"><table class="event-table"><thead><tr><th>Run</th><th>Mode</th><th>Status</th><th>Topic</th><th>Actual models</th><th>Duration</th><th>Artifacts</th><th>Action</th></tr></thead><tbody id="history-rows"><tr><td colspan="8" class="empty">Loading history…</td></tr></tbody></table></div></div>
+        <div class="panel replay-panel"><div class="panel-heading"><div><h2>Replay a recorded run</h2><p>Replay opens the same event inspector and labels every record as replay.</p></div></div><div class="form-grid replay-controls"><div><label for="replay-run">Recorded run</label><select id="replay-run"><option value="">Choose a JSONL run</option></select></div><div><label for="replay-speed">Replay delay (ms)</label><input id="replay-speed" type="number" min="0" max="250" value="35" /></div><div class="replay-action"><button id="start-replay" class="button primary">Replay events</button></div></div></div>
+      </section>
+    </main>
+    <footer><span>FODS controls task execution. The interface renders recorded runtime decisions.</span><a href="/" aria-label="Return to overview">Local demo interface</a></footer>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
