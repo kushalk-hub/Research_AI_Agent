@@ -1,0 +1,12 @@
+[
+  {"query_id": "Q01", "intent": "overview", "topic": "Graph attention networks", "question": "What are the main design families of graph attention networks, and how have they changed over time?"},
+  {"query_id": "Q02", "intent": "method_comparison", "topic": "Graph attention networks", "question": "How do graph attention methods differ in how they aggregate information from neighbors?"},
+  {"query_id": "Q03", "intent": "technical_mechanism", "topic": "Graph attention networks", "question": "How is attention computed over a node's local neighborhood in graph attention models?"},
+  {"query_id": "Q04", "intent": "lineage", "topic": "Graph attention networks", "question": "Which later graph transformer methods build on or replace graph attention networks?"},
+  {"query_id": "Q05", "intent": "limitations", "topic": "Graph attention networks", "question": "What limitations of graph attention models are explicitly reported by their authors?"},
+  {"query_id": "Q06", "intent": "evaluation", "topic": "Graph attention networks", "question": "What datasets and evaluation evidence are used to compare graph attention approaches?"},
+  {"query_id": "Q07", "intent": "open_problems", "topic": "Graph attention networks", "question": "Which open problems remain for scaling attention-based graph learning to large graphs?"},
+  {"query_id": "Q08", "intent": "robustness", "topic": "Graph attention networks", "question": "How robust are graph attention methods to noisy or incomplete graph structure?"},
+  {"query_id": "Q09", "intent": "efficiency", "topic": "Graph attention networks", "question": "What computational and memory tradeoffs distinguish sparse graph attention from global graph transformers?"},
+  {"query_id": "Q10", "intent": "evidence_synthesis", "topic": "Graph attention networks", "question": "Across the literature, which claims about attention weights as explanations are supported or challenged by evidence?"}
+]

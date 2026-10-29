@@ -18,6 +18,8 @@ class Planner(Protocol):
         question: str,
         output_path: str,
         source_names: Sequence[str],
+        queries: Sequence[str] | None = None,
+        per_query_limit: int = 10,
     ) -> TaskPlan: ...
 
 
@@ -41,33 +43,52 @@ class LLMPlanner:
         question: str,
         output_path: str,
         source_names: Sequence[str],
+        queries: Sequence[str] | None = None,
+        per_query_limit: int = 10,
     ) -> TaskPlan:
         from fods.models import TaskPlan
 
-        searches = "\n".join(
-            f"- search_{name}: args={{'query': string, 'limit': integer 1..20}}"
+        search_jobs = [
+            (
+                name,
+                query,
+                f"search_{name}" if len(queries or []) <= 1 else f"search_{name}_q{index + 1}",
+                0 if index == 0 else 1,
+            )
             for name in source_names
+            for index, query in enumerate(queries or [topic])
+        ]
+        searches = "\n".join(
+            f"- {task_id}: tool=search_{name}, round_index={round_index}, "
+            f"args={{'query': {query!r}, 'round_index': {round_index}, "
+            f"'limit': integer 1..{per_query_limit}}}"
+            for name, query, task_id, round_index in search_jobs
         )
         prompt = f"""Create a concise structured task plan for the user's research request.
 The runtime, not you, controls task order, concurrency, permissions, retries, and writes.
 Use these tools only:
 {searches}
 - merge_and_save_context: args={{}}
-- retrieve_evidence: args={{'question': string, 'max_results': integer 1..10}}
+- retrieve_evidence: args={{'question': string, 'max_results': integer 1..15}}
 - draft_cited_answer: args={{'question': string}}
 - validate_citations: args={{}}
 - write_cited_brief: args={{'output_path': string}}
+- acquisition_checkpoint: args={{}}
 
-Include one independent search task per listed source. Then include a merge depending on every
-search, retrieval depending on merge, answer depending on retrieval, citation validation depending
-on answer, and a write depending on both answer and validation. Set the write path exactly to the
-supplied path. Do not add tools or dependencies outside this flow.
+Include every listed source/query job as a separate FODS search task with its listed task id, tool,
+exact query, and round_index. Round 0 search tasks are independent. If there are round 1 jobs, add
+one acquisition_checkpoint task depending on every round 0 search; every round 1 task depends on
+that checkpoint. Then include a merge depending on every search, retrieval depending on merge,
+answer depending on retrieval, citation validation depending on answer, and a write depending on
+both answer and validation. Set the write path exactly to the supplied path. Do not add tools or
+dependencies outside this flow.
 
 Request: {request}
 Topic: {topic}
 Question: {question}
 Output path: {output_path}
 Available sources: {", ".join(source_names)}
+Validated search jobs:\n{searches}
 """
         proposed = await traced_model_call(
             self.event_log,
@@ -134,6 +155,13 @@ def canonicalize_llm_research_plan(
     source_tasks = [
         task for task in tasks if task.tool in {f"search_{name}" for name in source_names}
     ]
+    initial_source_tasks = [
+        task for task in source_tasks if int(task.args.get("round_index", 0)) == 0
+    ]
+    expanded_source_tasks = [
+        task for task in source_tasks if int(task.args.get("round_index", 0)) > 0
+    ]
+    checkpoint_tasks = [task for task in tasks if task.tool == "acquisition_checkpoint"]
     required_tools = (
         "merge_and_save_context",
         "retrieve_evidence",
@@ -141,9 +169,14 @@ def canonicalize_llm_research_plan(
         "validate_citations",
         "write_cited_brief",
     )
-    if len(source_tasks) < 2 or any(len(by_tool.get(tool, [])) != 1 for tool in required_tools):
+    if (
+        len(initial_source_tasks) < 2
+        or any(len(by_tool.get(tool, [])) != 1 for tool in required_tools)
+        or (expanded_source_tasks and len(checkpoint_tasks) != 1)
+        or (not expanded_source_tasks and checkpoint_tasks)
+    ):
         return proposed.model_copy(update={"tasks": tasks}), repairs
-    if len(tasks) != len(source_tasks) + len(required_tools):
+    if len(tasks) != len(source_tasks) + len(required_tools) + len(checkpoint_tasks):
         return proposed.model_copy(update={"tasks": tasks}), repairs
 
     merge = by_tool["merge_and_save_context"][0]
@@ -151,14 +184,18 @@ def canonicalize_llm_research_plan(
     answer = by_tool["draft_cited_answer"][0]
     citation_check = by_tool["validate_citations"][0]
     write = by_tool["write_cited_brief"][0]
+    checkpoint = checkpoint_tasks[0] if checkpoint_tasks else None
     dependencies = {
-        **{task.id: [] for task in source_tasks},
+        **{task.id: [] for task in initial_source_tasks},
         merge.id: [task.id for task in source_tasks],
         retrieve.id: [merge.id],
         answer.id: [retrieve.id],
         citation_check.id: [answer.id],
         write.id: [answer.id, citation_check.id],
     }
+    if checkpoint is not None:
+        dependencies[checkpoint.id] = [task.id for task in initial_source_tasks]
+        dependencies.update({task.id: [checkpoint.id] for task in expanded_source_tasks})
     normalized: list[Task] = []
     for task in tasks:
         expected = dependencies[task.id]
@@ -175,22 +212,50 @@ def deterministic_plan(
     output_path: str,
     source_names: Sequence[str],
     reuse_context: bool = False,
+    queries: Sequence[str] | None = None,
+    per_query_limit: int = 10,
 ) -> TaskPlan:
     if reuse_context:
         tasks = [Task(id="load_context", tool="load_saved_context", priority=10)]
         context_id = "load_context"
     else:
         fixed_priority = {"arxiv": 30, "openalex": 20, "semantic_scholar": 10}
-        tasks = [
-            Task(
-                id=f"search_{name}",
-                tool=f"search_{name}",
-                args={"query": topic, "limit": 8},
-                priority=fixed_priority.get(name, 10),
-            )
-            for name in source_names
-        ]
-        source_ids = [task.id for task in tasks]
+        planned_queries = list(queries or [topic])
+        source_tasks: list[Task] = []
+        for name in source_names:
+            for query_index, query in enumerate(planned_queries):
+                round_index = 0 if query_index == 0 else 1
+                source_tasks.append(
+                    Task(
+                        id=(
+                            f"search_{name}"
+                            if len(planned_queries) == 1
+                            else f"search_{name}_q{query_index + 1}"
+                        ),
+                        tool=f"search_{name}",
+                        args={
+                            "query": query,
+                            "limit": per_query_limit,
+                            "round_index": round_index,
+                        },
+                        depends_on=["acquisition_checkpoint"] if round_index else [],
+                        priority=fixed_priority.get(name, 10),
+                    )
+                )
+        if len(planned_queries) > 1:
+            initial_ids = [task.id for task in source_tasks if task.args.get("round_index") == 0]
+            tasks = [
+                Task(
+                    id="acquisition_checkpoint",
+                    tool="acquisition_checkpoint",
+                    depends_on=initial_ids,
+                    priority=15,
+                )
+            ]
+        else:
+            tasks = []
+        tasks.extend(source_tasks)
+        source_ids = [task.id for task in source_tasks]
         context_id = "merge"
     if not reuse_context:
         tasks.append(

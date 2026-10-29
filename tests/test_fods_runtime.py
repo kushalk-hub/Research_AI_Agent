@@ -12,6 +12,7 @@ from fods.plan import PlanError, validate_plan
 from fods.planner import canonicalize_llm_research_plan, deterministic_plan
 from fods.runtime import PriorityQueue, run_plan
 from fods.tools import ToolContext, create_registry, output_path
+from rla.models import Paper
 
 
 async def _empty_search(_query: str, _limit: int):
@@ -120,7 +121,15 @@ def test_persistent_single_source_failure_is_bounded_and_uses_partial_context(tm
         )
     )
 
-    assert result.succeeded
+    assert result.succeeded, (
+        result.termination_reason,
+        {task_id: record.state.value for task_id, record in result.states.items()},
+        [
+            (event["kind"], event["payload"].get("task_id"), event["message"])
+            for event in result.events
+            if event["kind"] in {"task_failed", "task_blocked"}
+        ],
+    )
     assert result.states["search_arxiv"].attempts == 2
     assert result.states["search_arxiv"].state.value == "failed"
     assert result.states["merge"].state.value == "completed"
@@ -129,6 +138,248 @@ def test_persistent_single_source_failure_is_bounded_and_uses_partial_context(tm
     assert (tmp_path / "brief.md").exists()
     partial = next(event for event in result.events if event["kind"] == "partial_source_set")
     assert len(partial["payload"]["successful_sources"]) == 2
+
+
+def test_deep_profile_keeps_searching_after_two_sources_until_target_or_budget(tmp_path):
+    async def search(name: str):
+        if name == "arxiv":
+            await asyncio.sleep(0.08)
+        else:
+            await asyncio.sleep(0.01)
+        return []
+
+    registry = create_registry(
+        {
+            "semantic_scholar": lambda _query, _limit: search("semantic_scholar"),
+            "openalex": lambda _query, _limit: search("openalex"),
+            "arxiv": lambda _query, _limit: search("arxiv"),
+        }
+    )
+    context = _context(tmp_path)
+    context.mode = "live"
+    context.metadata["research_policy"] = {
+        "profile": "deep",
+        "target_unique_papers": 25,
+        "max_retained_papers": 50,
+        "max_evidence_papers": 8,
+        "budget_seconds": 600,
+        "source_limit": 3,
+        "per_query_limit": 10,
+        "query_count": 4,
+        "minimum_sources": 3,
+        "early_quorum": False,
+    }
+
+    result = asyncio.run(run_plan(_plan(), registry, context, concurrency=3))
+
+    completed_sources = {
+        event["payload"].get("tool")
+        for event in result.events
+        if event["kind"] == "tool_call_completed"
+        and str(event["payload"].get("tool", "")).startswith("search_")
+    }
+    assert len(completed_sources) == 3
+    assert not any(
+        event["kind"] == "task_cancelled"
+        and event["payload"].get("recovery_action") == "source_quorum_reached"
+        for event in result.events
+    )
+
+
+def test_research_budget_stops_source_work_and_returns_labeled_partial_context(tmp_path):
+    async def search(name: str):
+        await asyncio.sleep(0.01 if name != "arxiv" else 0.2)
+        return [Paper.model_validate(FIXTURE_PAPERS[name][0])]
+
+    registry = create_registry(
+        {
+            "semantic_scholar": lambda _query, _limit: search("semantic_scholar"),
+            "openalex": lambda _query, _limit: search("openalex"),
+            "arxiv": lambda _query, _limit: search("arxiv"),
+        }
+    )
+    context = _context(tmp_path)
+    context.mode = "live"
+    context.metadata["research_policy"] = {
+        "profile": "deep",
+        "target_unique_papers": 25,
+        "candidate_limit": 100,
+        "minimum_sources": 2,
+        "early_quorum": False,
+    }
+
+    result = asyncio.run(
+        run_plan(_plan(), registry, context, concurrency=3, research_budget_seconds=0.04)
+    )
+    assert result.succeeded, (
+        result.termination_reason,
+        {task_id: record.state.value for task_id, record in result.states.items()},
+        [(event["kind"], event["payload"].get("task_id")) for event in result.events],
+    )
+    assert result.termination_reason == "completed_with_budget_limit"
+    assert any(
+        event["kind"] == "research_stopping"
+        and event["payload"]["stop_reason"] == "research_budget_exhausted"
+        for event in result.events
+    )
+
+
+def test_deep_budget_keeps_checkpoint_and_partial_context_answerable(tmp_path):
+    names = list(FIXTURE_PAPERS)
+
+    async def varied_search(source: str, _query: str, limit: int):
+        await asyncio.sleep(0.5 if source == names[-1] else 0.01)
+        return [Paper.model_validate(record) for record in FIXTURE_PAPERS[source][:limit]]
+
+    registry = create_registry(
+        {
+            name: (lambda query, limit, name=name: varied_search(name, query, limit))
+            for name in names
+        }
+    )
+    plan = deterministic_plan(
+        "Request",
+        "Graph attention",
+        "Compare graph attention methods",
+        "brief.md",
+        names,
+        queries=["Graph attention", "Graph attention limitations"],
+    )
+    context = _context(tmp_path)
+    context.mode = "live"
+    context.metadata["research_policy"] = {
+        "profile": "deep",
+        "target_unique_papers": 25,
+        "max_retained_papers": 50,
+        "candidate_limit": 100,
+        "minimum_sources": 2,
+        "early_quorum": False,
+    }
+
+    result = asyncio.run(
+        run_plan(plan, registry, context, concurrency=3, research_budget_seconds=0.15)
+    )
+
+    assert result.succeeded, (
+        result.termination_reason,
+        {task_id: (record.state.value, record.error) for task_id, record in result.states.items()},
+        [
+            (event["kind"], event["payload"], event["message"])
+            for event in result.events
+            if event["kind"] in {"task_failed", "task_blocked"}
+        ],
+    )
+    assert result.states["acquisition_checkpoint"].state.value == "completed"
+    assert result.states["merge"].state.value == "completed"
+    assert result.states["write"].state.value == "completed"
+
+
+def test_deep_profile_runs_second_query_round_when_first_round_is_under_target(tmp_path):
+    calls: list[tuple[str, str]] = []
+
+    async def search(source: str, query: str):
+        calls.append((source, query))
+        await asyncio.sleep(0.005)
+        return [Paper.model_validate(FIXTURE_PAPERS[source][0])]
+
+    names = list(FIXTURE_PAPERS)
+    registry = create_registry(
+        {name: (lambda query, _limit, name=name: search(name, query)) for name in names}
+    )
+    plan = deterministic_plan(
+        "Request",
+        "Graph attention",
+        "Compare graph attention methods",
+        "deep.md",
+        names,
+        queries=["Graph attention", "Graph attention comparative methods"],
+    )
+    context = _context(tmp_path, output="target.md")
+    context.mode = "live"
+    context.metadata["research_policy"] = {
+        "profile": "deep",
+        "target_unique_papers": 25,
+        "max_retained_papers": 50,
+        "candidate_limit": 100,
+        "minimum_sources": 3,
+        "early_quorum": False,
+    }
+
+    result = asyncio.run(run_plan(plan, registry, context, concurrency=3))
+
+    assert len(calls) == len(names) * 2
+    assert {query for _source, query in calls} == {
+        "Graph attention",
+        "Graph attention comparative methods",
+    }
+    assert any(event["kind"] == "query_round_completed" for event in result.events)
+    assert result.states["search_arxiv_q2"].state.value == "completed"
+
+
+def test_query_expansion_skips_network_calls_when_unique_target_is_already_met(tmp_path):
+    calls: list[tuple[str, str]] = []
+
+    async def search(source: str, query: str):
+        calls.append((source, query))
+        if query != "Graph attention":
+            pytest.fail("round-one source call should be skipped after target is met")
+        return [
+            Paper(
+                id=f"{source}-{index}",
+                title=f"Graph Attention Study {source} {index}",
+                year=2020 + index,
+                doi=f"10.5555/{source}-{index}",
+                abstract="Graph attention method for neighborhood evidence.",
+                sources=[source],
+            )
+            for index in range(2)
+        ]
+
+    names = list(FIXTURE_PAPERS)
+    registry = create_registry(
+        {name: (lambda query, _limit, name=name: search(name, query)) for name in names}
+    )
+    plan = deterministic_plan(
+        "Request",
+        "Graph attention",
+        "Compare graph attention methods",
+        "target.md",
+        names,
+        queries=["Graph attention", "Graph attention comparative methods"],
+    )
+    context = _context(tmp_path, output="target.md")
+    context.mode = "live"
+    context.metadata["research_policy"] = {
+        "profile": "deep",
+        "target_unique_papers": 4,
+        "max_retained_papers": 50,
+        "candidate_limit": 100,
+        "minimum_sources": 3,
+        "early_quorum": False,
+    }
+
+    result = asyncio.run(run_plan(plan, registry, context, concurrency=3))
+
+    assert len(calls) == len(names)
+    assert all(record.state.value == "completed" for record in result.states.values()), (
+        result.termination_reason,
+        {task_id: record.state.value for task_id, record in result.states.items()},
+        [
+            (event["kind"], event["payload"].get("task_id"), event["message"])
+            for event in result.events
+            if event["kind"] in {"task_failed", "task_blocked"}
+        ],
+    )
+    assert all(
+        record.result.get("status") == "skipped_stop_criteria"
+        for record in result.states.values()
+        if record.task.id.endswith("_q2")
+    )
+    assert any(
+        event["kind"] == "research_stopping"
+        and event["payload"]["stop_reason"] == "unique_paper_target_reached"
+        for event in result.events
+    )
 
 
 def test_fewer_than_two_successful_sources_blocks_context_and_output(tmp_path):
@@ -178,6 +429,34 @@ def test_invalid_citation_blocks_write_and_records_recovery(tmp_path):
         and event["payload"].get("tool") == "write_cited_brief"
         for event in result.events
     )
+
+
+def test_evidence_selection_obeys_token_budget_and_maps_citations_to_papers(tmp_path):
+    context = _context(tmp_path)
+    context.metadata["research_policy"] = {
+        "profile": "quick",
+        "evidence_token_budget": 1000,
+        "max_evidence_papers": 6,
+    }
+    context.metadata["fixtures"] = {
+        source: [
+            {**record, "abstract": (record.get("abstract", "") + " evidence") * 80}
+            for record in records
+        ]
+        for source, records in FIXTURE_PAPERS.items()
+    }
+
+    result = asyncio.run(run_plan(_plan(), _registry(), context, concurrency=3))
+
+    selection = next(event for event in result.events if event["kind"] == "evidence_selected")
+    assert selection["payload"]["estimated_evidence_units"] <= 1000
+    assert selection["payload"]["evidence_budget_limit"] == 1000
+    validation = next(event for event in result.events if event["kind"] == "citation_validation")
+    mapping = validation["payload"]["claim_evidence_map"]
+    assert validation["payload"]["valid"] is True
+    assert mapping
+    assert all(item["paper_ids"] for item in mapping)
+    assert all(item["support_status"] == "unverified" for item in mapping)
 
 
 def test_user_cancellation_is_recorded_and_never_saves_a_brief(tmp_path):

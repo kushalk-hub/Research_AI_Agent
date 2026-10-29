@@ -1,6 +1,8 @@
 # FODS Research Agent Frontend Design Research
 
-**Status:** Design specification for review; implementation has not started
+**Status:** Frontend proposal only; frontend implementation is deferred until the backend CLI
+acceptance and human-reviewed retrieval benchmark in
+`docs/research_architecture_and_cli_acceptance.md` are complete.
 **Research date:** 2026-10-29
 **Scope:** Frontend experience and the minimum backend/event changes needed to support it
 
@@ -20,7 +22,9 @@ This document is an implementation-ready frontend design specification based on 
 
 The Firecrawl website-design-clone workflow was attempted for the official reference site. Firecrawl returned an account-banned authorization error, so no Firecrawl capture, scrape, screenshot, or generated asset was used. The official DeepSeek product page was inspected visually in a browser, and its official repository and documentation were read. The documentation root did not expose readable page text through the web reader; the specific official quickstart and subsystem pages were readable. The product page uses illustrative product panels and is not evidence that every depicted control is part of a running application.
 
-The repository review was read-only for application code. No code, dependency, environment, key, runtime, or data changes were made for this report. The only intended deliverable is this document.
+This document remains a frontend design proposal. Backend behavior described as existing was
+observed at the time of research and must be checked against the active backend acceptance report;
+this proposal does not authorize frontend implementation in the backend-first milestone.
 
 ## 3. Current implementation inventory
 
@@ -243,16 +247,21 @@ The context model should identify snapshot ID, topic/query fingerprint, creation
 
 Semantic citation support is a separate research capability. The current “allowed citation ID” check is a useful integrity gate but cannot establish entailment. If pursued, make it an optional verifier with a disclosed method, per-claim evidence mapping, failure behavior, and evaluation set; never relabel ID integrity as proof of factual correctness.
 
+Research quality must be addressed before implementing the redesigned frontend. In particular, report separately: raw source records, unique papers after conservative deduplication, papers retained in the context snapshot, papers selected as evidence for this question, and papers cited in the final answer. A configurable deep-research profile should initially target 20–30 unique papers, retain at most 50, and use a 5–10 minute budget; these are hypotheses to measure, not guaranteed yields. If a topic or source set falls short, report the shortfall and stopping reason rather than padding the evidence list.
+
+Acquisition should record question intent, validated search queries, source/query/time/filters, raw and normalized metadata, deduplication decisions, ranking signals, and stop conditions. Quick mode may use a source-success quorum and early answer; Deep mode continues eligible source/query tasks until its paper target, coverage/diminishing-return rule, per-source limit, or time/step budget is met. It must not cancel merely because two sources returned. Extraction and graph enrichment belong in the backend/CLI milestone as bounded, resumable work with paper-content, extraction-schema, and model-version identity. Cite/source edges remain distinct from inferred concept relations.
+
+The CLI is the first acceptance surface. It must expose mode/profile, source and paper limits, evidence target, concurrency, time budget, extraction policy, and context reuse/refresh. Its run summary must show the five counts above, exact query/source coverage, source failures, cache decisions, extraction coverage, snapshot identity, actual model attribution, per-stage timings, citation integrity, claim-support status, and completion/partial-stop reason. Preserve existing API/SSE and offline HTML behavior until this gate passes.
+
 ## 13. Prioritized implementation roadmap
 
-1. **P0 — App shell and run navigation:** left history rail, selected run/conversation header, Chat/Trace/FODS Visualizer destinations; keep current backend API compatibility.
-2. **P0 — Chat vertical slice:** question composer, plan/progress, incremental evidence, answer/status/model, cited evidence drawer, context reuse chip.
-3. **P0 — Provenance and run status:** display live/simulation/replay consistently; actual planner/answer model; quorum and partial-result state; safe brief-save result.
-4. **P0 — Trace projection:** chronological event list plus aligned task/model/tool/source spans, synchronized selection, useful filters. Read current logs first; add only minimal event-normalization fields.
-5. **P0 demo — FODS visualizer:** DAG, readiness queue, worker state, stack/recovery, shared event cursor, play/pause/step/reset; show existing deterministic FIFO/priority, cycle, failure, citation scenarios with simulation labels.
-6. **P1 — Session/context polish:** durable conversation-to-run relationship, named context snapshots, fresh/add-source affordances, log compatibility and reconnect behavior.
-7. **P1 — Accessibility and resilience:** keyboard operation, reduced motion, narrow layout, SSE reconnect/duplicate handling, corrupt log messages.
-8. **P2 — Research enrichment:** optional full text, concept graph, semantic citation review, and deeper comparative evaluation only after latency and source coverage are measured.
+1. **Backend gate 1 — Research acquisition:** define Quick/Deep profiles; validated intent and query expansion; individually scheduled source/query tasks; reproducible search/provenance records; conservative deduplication; transparent ranking; configurable candidate/retained/evidence/time/source limits; bounded stopping and partial-result reporting.
+2. **Backend gate 2 — Reusable evidence context:** persist immutable, versioned snapshots; distinguish raw/unique/retained/evidence-selected/cited counts; preserve source/query lineage; support reuse without reacquisition and explicit refresh.
+3. **Backend gate 3 — Extraction and graph:** use existing RLA extraction/store/graph contracts only after integrity checks; benchmark structured batch sizes of 3–5 papers; make extraction resumable by paper content, model, and schema version; retain source evidence type and evidence spans; keep citation and inferred-concept edges distinct.
+4. **Backend gate 4 — Answer integrity and CLI:** expose the full research controls and run summary in the CLI; enforce citation integrity; map claims to evidence; label semantic support unverified until a method is validated; keep answer output available when optional enrichment fails.
+5. **Backend gate 5 — Verification:** test workflow and failure modes through CLI/runtime seams, preserve old JSONL/API/SSE/offline HTML compatibility, run full regression, and compare the old five-paper baseline with the new path on the same human-reviewed questions. Do not claim quality improvement until the benchmark is human-reviewed.
+6. **Frontend gate — deferred:** only after the backend/CLI acceptance gate passes, redesign the app shell and Chat/Trace/FODS Visualizer against the stable runtime, event, and context contracts. Preserve the current working browser UI during all backend work; do not rebuild it in parallel.
+7. **Later research:** optional full-text sources, further citation snowballing, semantic citation review, and additional visualization polish after measured evidence and latency support the investment.
 
 The critical path for an early demo is items 1–5, using the existing runtime and deterministic scenarios. Do not start with a broad rewrite of the RLA pipeline; this design does not require one.
 
@@ -293,10 +302,9 @@ Repository sources inspected for current-state claims include `src/fods/web/inde
 
 ## 16. Open questions for design approval
 
-1. Should a conversation contain multiple research runs/turns from the first demo, or should the demo use one run with a context-reuse follow-up and defer persistent chat threading?
-2. At quorum, should the first answer be marked `Draft/Partial` while optional sources continue, or should answering wait until all requested sources complete? The speed goal favors quorum-first with honest status.
-3. Which source count and concurrency should be the default demo setting given observed API quotas and local machine capacity?
-4. Should context snapshots be immutable with explicit refresh-created versions? This is recommended for reproducibility.
-5. Is the demo expected to include actual web/source execution only, or should deterministic simulation also be a first-class presentation path for scheduler comparisons?
-6. Should the answer exporter remain a named file in the approved workspace, and which format is required for the presentation (Markdown is already supported)?
-7. Which visual style is preferred for the FODS canvas: dark technical canvas beside a light research workspace, or one unified light theme?
+1. Which small benchmark questions and cornerstone claims should the team human-review first, across overview, comparison, lineage, methods, and limitations/gaps?
+2. Should Deep mode default to a 5-minute or 10-minute budget on the demonstration machine? The initial implementation should make this configurable and measure both.
+3. Which paper cap within 20–30 unique papers should be the default Deep target, with an absolute retained-context maximum of 50?
+4. Should a conversation contain multiple research runs/turns from the first frontend release, or should the frontend demo begin with one run plus a context-reuse follow-up?
+5. Should the answer exporter remain a named file in the approved workspace, and which format is required (Markdown is supported)?
+6. Which visual style is preferred for the deferred FODS canvas: dark technical canvas beside a light research workspace, or one unified light theme?

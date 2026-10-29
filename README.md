@@ -18,6 +18,18 @@ and [demo commands](docs/demo_commands.md).
 
 > The FODS demo can be run with `python -m fods.cli` or the installed `fods` command.
 
+## FODS backend CLI profiles
+
+Use `fods run --profile quick` for a fast answerable abstract context, or
+`fods run --profile deep` for bounded multi-query collection. The CLI records source timings,
+candidate/context/evidence counts, snapshot identity, and citation-ID checks. Read
+[research architecture and CLI acceptance](docs/research_architecture_and_cli_acceptance.md) for
+limits, reuse/refresh commands, and evaluation criteria. Optional follow-on workflows are
+`fods enrich` (bounded local Ollama extraction tasks) and `fods discover-references` (bounded
+one-hop academic reference resolution); both leave the original abstract context unchanged.
+Retrieval quality is marked `PENDING HUMAN REVIEW`; the benchmark pack and protocol are in
+[`docs/retrieval_benchmark_baseline.md`](docs/retrieval_benchmark_baseline.md).
+
 ## FODS browser visualizer
 
 Start the local interactive interface from the repository root:

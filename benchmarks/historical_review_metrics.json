@@ -1,0 +1,194 @@
+{
+  "quality_verdict": "PENDING HUMAN REVIEW",
+  "source_pack": "benchmarks\\historical_review_pack.csv",
+  "k_values": [
+    5,
+    10
+  ],
+  "groups": {
+    "adhoc-1e592962/unknown": {
+      "unique_candidates": 11,
+      "reviewed_candidates": 0,
+      "relevant_candidates": 0,
+      "uncertain_candidates": 0,
+      "source_diversity": 3,
+      "duplicate_rate": 0.08333333333333333,
+      "abstract_coverage": 0.9090909090909091,
+      "candidate_truncation_count": 0,
+      "failed_source_count": 0,
+      "unavailable_source_count": 1,
+      "acquisition_latency": {
+        "median_ms": 942.9499999999999,
+        "p90_ms": 1719.8,
+        "run_denominator": 2
+      },
+      "total_latency": {
+        "median_ms": 8936.050000000001,
+        "p90_ms": 17664.2,
+        "run_denominator": 2
+      },
+      "failed_runs": 0,
+      "selected_evidence_papers": 7,
+      "cited_papers": 6,
+      "citation_validation_runs": 2,
+      "citation_validation_invalid_runs": 0,
+      "precision_at_k": {
+        "5": {
+          "value": null,
+          "relevant": 0,
+          "reviewed_denominator": 0,
+          "requested_k": 5
+        },
+        "10": {
+          "value": null,
+          "relevant": 0,
+          "reviewed_denominator": 0,
+          "requested_k": 10
+        }
+      },
+      "recall_at_k": {
+        "5": null,
+        "10": null
+      },
+      "judged_pool_complete": false
+    },
+    "adhoc-b021b27b/unknown": {
+      "unique_candidates": 6,
+      "reviewed_candidates": 0,
+      "relevant_candidates": 0,
+      "uncertain_candidates": 0,
+      "source_diversity": 2,
+      "duplicate_rate": 0.0,
+      "abstract_coverage": 0.8333333333333334,
+      "candidate_truncation_count": 0,
+      "failed_source_count": 0,
+      "unavailable_source_count": 1,
+      "acquisition_latency": {
+        "median_ms": 1190.9,
+        "p90_ms": 1190.9,
+        "run_denominator": 1
+      },
+      "total_latency": {
+        "median_ms": 20363.1,
+        "p90_ms": 20363.1,
+        "run_denominator": 1
+      },
+      "failed_runs": 0,
+      "selected_evidence_papers": 3,
+      "cited_papers": 1,
+      "citation_validation_runs": 1,
+      "citation_validation_invalid_runs": 0,
+      "precision_at_k": {
+        "5": {
+          "value": null,
+          "relevant": 0,
+          "reviewed_denominator": 0,
+          "requested_k": 5
+        },
+        "10": {
+          "value": null,
+          "relevant": 0,
+          "reviewed_denominator": 0,
+          "requested_k": 10
+        }
+      },
+      "recall_at_k": {
+        "5": null,
+        "10": null
+      },
+      "judged_pool_complete": false
+    },
+    "adhoc-f49aa135/unknown": {
+      "unique_candidates": 20,
+      "reviewed_candidates": 0,
+      "relevant_candidates": 0,
+      "uncertain_candidates": 0,
+      "source_diversity": 3,
+      "duplicate_rate": 0.16666666666666666,
+      "abstract_coverage": 1.0,
+      "candidate_truncation_count": 0,
+      "failed_source_count": 0,
+      "unavailable_source_count": 0,
+      "acquisition_latency": {
+        "median_ms": 62.45,
+        "p90_ms": 68.9,
+        "run_denominator": 4
+      },
+      "total_latency": {
+        "median_ms": 94.75,
+        "p90_ms": 96.7,
+        "run_denominator": 4
+      },
+      "failed_runs": 0,
+      "selected_evidence_papers": 14,
+      "cited_papers": 10,
+      "citation_validation_runs": 4,
+      "citation_validation_invalid_runs": 0,
+      "precision_at_k": {
+        "5": {
+          "value": null,
+          "relevant": 0,
+          "reviewed_denominator": 0,
+          "requested_k": 5
+        },
+        "10": {
+          "value": null,
+          "relevant": 0,
+          "reviewed_denominator": 0,
+          "requested_k": 10
+        }
+      },
+      "recall_at_k": {
+        "5": null,
+        "10": null
+      },
+      "judged_pool_complete": false
+    },
+    "overall/unknown": {
+      "unique_candidates": 37,
+      "reviewed_candidates": 0,
+      "relevant_candidates": 0,
+      "uncertain_candidates": 0,
+      "source_diversity": 3,
+      "duplicate_rate": 0.11904761904761904,
+      "abstract_coverage": 0.9459459459459459,
+      "candidate_truncation_count": 0,
+      "failed_source_count": 0,
+      "unavailable_source_count": 1,
+      "acquisition_latency": {
+        "median_ms": 68.9,
+        "p90_ms": 1719.8,
+        "run_denominator": 7
+      },
+      "total_latency": {
+        "median_ms": 96.7,
+        "p90_ms": 20363.1,
+        "run_denominator": 7
+      },
+      "failed_runs": 0,
+      "selected_evidence_papers": 24,
+      "cited_papers": 17,
+      "citation_validation_runs": 7,
+      "citation_validation_invalid_runs": 0,
+      "precision_at_k": {
+        "5": {
+          "value": null,
+          "relevant": 0,
+          "reviewed_denominator": 0,
+          "requested_k": 5
+        },
+        "10": {
+          "value": null,
+          "relevant": 0,
+          "reviewed_denominator": 0,
+          "requested_k": 10
+        }
+      },
+      "recall_at_k": {
+        "5": null,
+        "10": null
+      },
+      "judged_pool_complete": false
+    }
+  }
+}

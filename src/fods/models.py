@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +35,7 @@ class TaskPlan(BaseModel):
     topic: str = Field(min_length=1, max_length=300)
     question: str = Field(min_length=1, max_length=1000)
     output_path: str = Field(min_length=1, max_length=500)
+    workflow: Literal["research", "enrichment", "reference_discovery"] = "research"
     tasks: list[Task] = Field(min_length=1, max_length=30)
 
 

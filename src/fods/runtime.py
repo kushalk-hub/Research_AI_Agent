@@ -16,7 +16,9 @@ from typing import Any
 from fods.events import EventLog
 from fods.models import RunResult, TaskPlan, TaskRecord, TaskState
 from fods.plan import PlanError, validate_plan
+from fods.research import deduplicate_candidates
 from fods.tools import ToolContext, ToolRegistry
+from rla.models import Paper
 
 
 class RetryableToolError(RuntimeError):
@@ -67,7 +69,28 @@ def _result_summary(result: Any) -> dict[str, Any]:
         "snapshot_path",
         "duplicates_merged",
         "source_count",
+        "query",
+        "retrieved_at",
+        "cache_policy",
+        "round_index",
         "valid",
+        "cache_reused",
+        "batch_key",
+        "model",
+        "schema_version",
+        "papers_enriched",
+        "concept_count",
+        "inferred_relation_count",
+        "context_id",
+        "discovered_count",
+        "resolved_edges",
+        "status",
+        "seed_paper_id",
+        "candidate_count",
+        "reason",
+        "candidate_paper_ids",
+        "parent_context_id",
+        "reference_record_count",
     ):
         if key in result:
             summary[key] = result[key]
@@ -136,6 +159,9 @@ async def run_plan(
     event_sink: Callable[[Any], None] | None = None,
     event_log: EventLog | None = None,
     cancel_event: Event | None = None,
+    research_budget_seconds: int | None = None,
+    research_profile: dict[str, Any] | None = None,
+    workflow_budget_seconds: int | None = None,
 ) -> RunResult:
     """Validate before tool calls, then schedule only tasks whose inputs completed."""
     if concurrency < 1 or max_attempts < 1:
@@ -146,6 +172,25 @@ async def run_plan(
     run_started = time.perf_counter()
     run_id = context.run_id or uuid.uuid4().hex[:12]
     base_context = replace(context, run_id=run_id)
+    profile = dict(context.metadata.get("research_policy", research_profile or {}))
+    minimum_sources = int(profile.get("minimum_sources", 2))
+    acquisition_budget = (
+        research_budget_seconds
+        if research_budget_seconds is not None
+        else profile.get("budget_seconds")
+    )
+    acquisition_deadline = (
+        time.monotonic() + max(0.0, float(acquisition_budget))
+        if acquisition_budget is not None
+        else None
+    )
+    workflow_deadline = (
+        time.monotonic() + max(0.0, float(workflow_budget_seconds))
+        if workflow_budget_seconds is not None
+        else None
+    )
+    acquisition_stop_reason = ""
+    workflow_stop_reason = ""
     log.emit(
         "plan_received",
         "structured plan received",
@@ -197,6 +242,35 @@ async def run_plan(
     running: dict[asyncio.Task[Any], str] = {}
     dispatch_counter = 0
 
+    def completed_source_names() -> set[str]:
+        return {
+            record.task.tool.removeprefix("search_")
+            for record in records.values()
+            if record.task.tool.startswith("search_")
+            and record.state is TaskState.COMPLETED
+            and outputs.get(record.task.id, {}).get("status") != "skipped_stop_criteria"
+        }
+
+    def candidate_counts() -> tuple[int, int]:
+        candidates: list[tuple[str, str, Paper]] = []
+        for value in outputs.values():
+            if (
+                not isinstance(value, dict)
+                or not value.get("source")
+                or value.get("status") == "skipped_stop_criteria"
+            ):
+                continue
+            for item in value.get("papers", []):
+                candidates.append(
+                    (
+                        str(value["source"]),
+                        str(value.get("query", "")),
+                        Paper.model_validate(item),
+                    )
+                )
+        pool = deduplicate_candidates(candidates)
+        return len(candidates), pool.unique_paper_count
+
     def enqueue(task_id: str) -> None:
         nonlocal dispatch_counter
         record = records[task_id]
@@ -247,10 +321,19 @@ async def run_plan(
             dependencies_now = [records[dep] for dep in child.task.depends_on]
             pending = [dep for dep in dependencies_now if dep.state is not TaskState.COMPLETED]
             source_quorum_ready = (
-                child.task.tool == "merge_and_save_context"
+                child.task.tool in {"merge_and_save_context", "acquisition_checkpoint"}
                 and all(dependency.state in terminal_states for dependency in dependencies_now)
-                and sum(dependency.state is TaskState.COMPLETED for dependency in dependencies_now)
-                >= 2
+                and len(
+                    {
+                        dependency.task.tool.removeprefix("search_")
+                        for dependency in dependencies_now
+                        if dependency.state is TaskState.COMPLETED
+                        and dependency.task.tool.startswith("search_")
+                        and outputs.get(dependency.task.id, {}).get("status")
+                        != "skipped_stop_criteria"
+                    }
+                )
+                >= minimum_sources
             )
             log.emit(
                 "dependency_updated",
@@ -269,7 +352,11 @@ async def run_plan(
                     else "all_prerequisites_completed"
                 ),
             )
-            if child.task.tool == "merge_and_save_context":
+            if child.task.tool == "acquisition_checkpoint" and any(
+                dependency.state not in terminal_states for dependency in dependencies_now
+            ):
+                continue
+            if child.task.tool in {"merge_and_save_context", "acquisition_checkpoint"}:
                 dependencies = dependencies_now
                 if any(dependency.state not in terminal_states for dependency in dependencies):
                     continue
@@ -277,8 +364,14 @@ async def run_plan(
                     dependency
                     for dependency in dependencies
                     if dependency.state is TaskState.COMPLETED
+                    and outputs.get(dependency.task.id, {}).get("status") != "skipped_stop_criteria"
                 ]
-                if len(completed_sources) >= 2:
+                successful_names = {
+                    dependency.task.tool.removeprefix("search_")
+                    for dependency in completed_sources
+                    if dependency.task.tool.startswith("search_")
+                }
+                if len(successful_names) >= minimum_sources:
                     failed_sources = [
                         dependency.task.id
                         for dependency in dependencies
@@ -293,7 +386,7 @@ async def run_plan(
                                 dependency.task.id for dependency in completed_sources
                             ],
                             unavailable_sources=failed_sources,
-                            minimum_sources=2,
+                            minimum_sources=minimum_sources,
                         )
                     if child.state is TaskState.PLANNED:
                         enqueue(child_id)
@@ -420,34 +513,119 @@ async def run_plan(
             return task_id, None, exc, duration_ms
 
     def cancel_optional_sources() -> None:
+        nonlocal acquisition_stop_reason
         sources = [record for record in records.values() if record.task.tool.startswith("search_")]
-        successes = [record for record in sources if record.state is TaskState.COMPLETED]
-        if context.mode != "live" or len(sources) < 3 or len(successes) < 2:
+        successful_names = completed_source_names()
+        if context.mode != "live" or not sources or len(successful_names) < minimum_sources:
             return
-        successful_names = [record.task.id for record in successes]
+        raw_count, unique_count = candidate_counts()
+        if profile.get("early_quorum", True):
+            stop_reason = "source_quorum_reached"
+        elif unique_count >= int(profile.get("target_unique_papers", 25)):
+            stop_reason = "unique_paper_target_reached"
+        elif raw_count >= int(profile.get("candidate_limit", 100)):
+            stop_reason = "candidate_limit_reached"
+        else:
+            return
+        if acquisition_stop_reason:
+            return
+        acquisition_stop_reason = stop_reason
+        log.emit(
+            "research_stopping",
+            f"stopping acquisition: {stop_reason}",
+            stop_reason=stop_reason,
+            raw_candidate_count=raw_count,
+            unique_paper_count=unique_count,
+            successful_sources=sorted(successful_names),
+        )
         for future, task_id in list(running.items()):
             if records[task_id].task.tool.startswith("search_") and not future.done():
                 log.emit(
                     "task_cancel_requested",
-                    f"canceling optional source {task_id} after two sources returned",
+                    f"canceling optional acquisition task {task_id}: {stop_reason}",
                     task_id=task_id,
-                    recovery_action="source_quorum_reached",
-                    successful_sources=successful_names,
+                    recovery_action=stop_reason,
+                    successful_sources=sorted(successful_names),
                 )
                 future.cancel()
         for record in sources:
             if record.state is TaskState.READY:
                 record.state = TaskState.CANCELLED
-                record.error = "cancelled after two sources returned"
+                record.error = f"cancelled: {stop_reason}"
                 log.emit(
                     "task_cancelled",
-                    f"{record.task.id} skipped after source quorum",
+                    f"{record.task.id} skipped: {stop_reason}",
                     task_id=record.task.id,
-                    recovery_action="source_quorum_reached",
-                    successful_sources=successful_names,
+                    recovery_action=stop_reason,
+                    successful_sources=sorted(successful_names),
+                )
+
+    def expire_acquisition_budget() -> None:
+        nonlocal acquisition_stop_reason
+        if acquisition_deadline is None or time.monotonic() < acquisition_deadline:
+            return
+        if acquisition_stop_reason == "research_budget_exhausted":
+            return
+        if not acquisition_stop_reason:
+            acquisition_stop_reason = "research_budget_exhausted"
+            raw_count, unique_count = candidate_counts()
+            log.emit(
+                "research_stopping",
+                "stopping acquisition: configured time budget exhausted",
+                stop_reason=acquisition_stop_reason,
+                budget_seconds=acquisition_budget,
+                raw_candidate_count=raw_count,
+                unique_paper_count=unique_count,
+                successful_sources=sorted(completed_source_names()),
+            )
+        for future, task_id in list(running.items()):
+            if records[task_id].task.tool.startswith("search_") and not future.done():
+                future.cancel()
+        for record in records.values():
+            if record.task.tool.startswith("search_") and record.state in {
+                TaskState.READY,
+                TaskState.PLANNED,
+            }:
+                record.state = TaskState.CANCELLED
+                record.error = "cancelled: research budget exhausted"
+                log.emit(
+                    "task_cancelled",
+                    f"{record.task.id} skipped: research budget exhausted",
+                    task_id=record.task.id,
+                    recovery_action="research_budget_exhausted",
+                )
+                block_descendants(record.task.id, record.error)
+
+    def expire_workflow_budget() -> None:
+        nonlocal workflow_stop_reason
+        if workflow_deadline is None or time.monotonic() < workflow_deadline:
+            return
+        if workflow_stop_reason:
+            return
+        workflow_stop_reason = "workflow_budget_exhausted"
+        log.emit(
+            "workflow_stopping",
+            "stopping workflow: configured total time budget exhausted",
+            stop_reason=workflow_stop_reason,
+            budget_seconds=workflow_budget_seconds,
+        )
+        for future, _task_id in list(running.items()):
+            if not future.done():
+                future.cancel()
+        for record in records.values():
+            if record.state in {TaskState.READY, TaskState.PLANNED}:
+                record.state = TaskState.CANCELLED
+                record.error = "cancelled: workflow time budget exhausted"
+                log.emit(
+                    "task_cancelled",
+                    f"{record.task.id} skipped: workflow time budget exhausted",
+                    task_id=record.task.id,
+                    recovery_action=workflow_stop_reason,
                 )
 
     while queue or running:
+        expire_acquisition_budget()
+        expire_workflow_budget()
         if cancel_event is not None and cancel_event.is_set():
             log.emit(
                 "run_cancel_requested",
@@ -505,9 +683,18 @@ async def run_plan(
 
         if not running:
             break
+        wait_timeout = 0.2 if cancel_event is not None else None
+        if acquisition_deadline is not None:
+            remaining = max(0.0, acquisition_deadline - time.monotonic())
+            if wait_timeout is None or remaining < wait_timeout:
+                wait_timeout = remaining
+        if workflow_deadline is not None:
+            remaining = max(0.0, workflow_deadline - time.monotonic())
+            if wait_timeout is None or remaining < wait_timeout:
+                wait_timeout = remaining
         done, _pending = await asyncio.wait(
             running,
-            timeout=0.2 if cancel_event is not None else None,
+            timeout=wait_timeout,
             return_when=asyncio.FIRST_COMPLETED,
         )
         if not done:
@@ -537,11 +724,18 @@ async def run_plan(
                         paper_count=value.get("paper_count", 0),
                         abstract_count=value.get("abstract_count", 0),
                         context_hash=value.get("context_hash", ""),
+                        context_built_at=value.get("built_at", ""),
                         snapshot_path=value.get("snapshot_path", ""),
                         source_names=value.get("source_names", []),
                         duplicates_merged=value.get("duplicates_merged", 0),
                         citation_links_resolved=value.get("citation_links_resolved", 0),
                         citation_links_dropped=value.get("citation_links_dropped", 0),
+                        reference_ids_observed_count=value.get("reference_ids_observed_count", 0),
+                        raw_candidate_count=value.get("raw_candidate_count", 0),
+                        candidates_processed_count=value.get("candidates_processed_count", 0),
+                        candidates_truncated_count=value.get("candidates_truncated_count", 0),
+                        unique_paper_count=value.get("unique_paper_count", 0),
+                        retained_paper_count=value.get("retained_paper_count", 0),
                         papers=value.get("papers", []),
                         elapsed_ms=round(
                             (time.perf_counter() - run_started) * 1000
@@ -555,12 +749,15 @@ async def run_plan(
 
             if isinstance(error, asyncio.CancelledError):
                 record.state = TaskState.CANCELLED
-                record.error = "cancelled after the source quorum was reached"
+                cancel_reason = (
+                    workflow_stop_reason or acquisition_stop_reason or "user_cancelled_run"
+                )
+                record.error = f"cancelled: {cancel_reason}"
                 log.emit(
                     "task_cancelled",
-                    f"{task_id} cancelled after two sources returned",
+                    f"{task_id} cancelled: {cancel_reason}",
                     task_id=task_id,
-                    recovery_action="source_quorum_reached",
+                    recovery_action=cancel_reason,
                 )
                 block_descendants(task_id, record.error)
                 continue
@@ -601,16 +798,35 @@ async def run_plan(
         record for record in records.values() if record.task.tool.startswith("search_")
     ]
     required_records = [record for record in records.values() if record not in source_records]
-    source_successes = sum(record.state is TaskState.COMPLETED for record in source_records)
+    source_successes = len(completed_source_names())
     source_unavailable = [
-        record.task.id for record in source_records if record.state is not TaskState.COMPLETED
+        record.task.id
+        for record in source_records
+        if record.state is not TaskState.COMPLETED
+        or outputs.get(record.task.id, {}).get("status") == "skipped_stop_criteria"
+    ]
+    source_unavailable = [
+        task_id
+        for task_id in source_unavailable
+        if outputs.get(task_id, {}).get("status") != "skipped_stop_criteria"
     ]
     succeeded = all(record.state is TaskState.COMPLETED for record in required_records) and (
-        not source_records or source_successes >= 2
+        not source_records or source_successes >= minimum_sources
     )
     reason = (
-        "cancelled"
+        "workflow_budget_exhausted"
+        if workflow_stop_reason
+        else "cancelled"
         if cancel_event is not None and cancel_event.is_set()
+        else "completed_with_budget_limit"
+        if succeeded and acquisition_stop_reason == "research_budget_exhausted"
+        else "completed_at_research_target"
+        if succeeded
+        and acquisition_stop_reason
+        in {
+            "unique_paper_target_reached",
+            "candidate_limit_reached",
+        }
         else "completed_with_partial_sources"
         if succeeded and source_unavailable
         else "completed"
@@ -629,6 +845,11 @@ async def run_plan(
         cancellation_requested=bool(cancel_event and cancel_event.is_set()),
         mode=context.mode,
         successful_source_count=source_successes,
+        source_task_success_count=sum(
+            record.state is TaskState.COMPLETED for record in source_records
+        ),
+        unique_paper_target=int(profile.get("target_unique_papers", 0)),
+        research_stop_reason=acquisition_stop_reason or reason,
         unavailable_sources=source_unavailable,
         elapsed_ms=round(
             (time.perf_counter() - run_started) * 1000

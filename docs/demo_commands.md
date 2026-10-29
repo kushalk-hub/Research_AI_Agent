@@ -1,7 +1,8 @@
 # Demo & Manual Test Commands
 
-Every command below was run and verified on this machine. Anything that needs a key or
-quota is marked, and what you will actually see is stated.
+Commands below are operational examples with provider and quota prerequisites called out. The
+exact checks completed for the current checkout are recorded in
+[`phase2_verification_report.md`](phase2_verification_report.md).
 
 ```powershell
 # Activate once per shell
@@ -42,7 +43,14 @@ python -m fods.cli run `
   --topic "Graph Attention Networks" `
   --question "How did graph attention use local neighborhoods?" `
   --output "data/fods/briefs/gat-first.md" `
-  --mode simulate --planner fixture --concurrency 3
+  --mode simulate --planner fixture --concurrency 3 --profile quick
+
+# Broader bounded acquisition: 5 sources, 4 queries, up to 25 unique papers, 10-minute cap.
+python -m fods.cli run `
+  --topic "Graph Attention Networks" `
+  --question "Compare methods, evidence, and limitations" `
+  --output "data/fods/briefs/gat-deep.md" `
+  --mode live --planner ollama --profile deep --fresh-sources
 
 # Ask another question using the stored context, with a new explicit output path.
 python -m fods.cli run `
@@ -90,18 +98,48 @@ python -m fods.cli run --topic "Graph Attention Networks" --question "How does a
 
 # Render the event file printed by the run command. Replay does not call tools.
 python -m fods.cli replay "data/fods/runs/<run-id>.jsonl"
+
+# Enrich an existing saved context with bounded local Qwen tasks (no Gemini fallback).
+python -m fods.cli enrich --topic "Graph Attention Networks" `
+  --model "ollama/qwen3:4b" --max-papers 15 --batch-size 3 --time-budget 600 --workers 4
+
+# Optional one-hop provider-reference discovery; save a new immutable context snapshot.
+python -m fods.cli discover-references --topic "Graph Attention Networks" `
+  --hops 1 --seed-limit 5 --source semantic_scholar --source-limit 2 `
+  --candidate-limit 10 --time-budget 120 --workers 4
+
+# No-expansion case: save a derived snapshot with zero resolver calls.
+python -m fods.cli discover-references --topic "Graph Attention Networks" --hops 0
+
+# Build a blank-label pack from preserved Quick/Deep logs and score only human labels.
+python -m fods.benchmark collect --query-set benchmarks/retrieval_queries.json `
+  --output benchmarks/retrieval_review.csv data/fods/runs/<quick>.jsonl data/fods/runs/<deep>.jsonl
+python -m fods.benchmark score --input benchmarks/retrieval_review.csv `
+  --output benchmarks/retrieval_metrics.json --k 5 10
 ```
 
-Live mode continues after at least two academic sources succeed and records unavailable or
-cancelled sources. `--fresh-sources` gives this run an empty dedicated source cache so API calls are
-real network executions; without it, live mode is cache-first. Fewer than two successful sources
-blocks context creation and output.
+Live mode records unavailable or cancelled sources and applies profile-specific quorum: Quick
+requires two successful academic sources; Deep requires three. The context and output are blocked
+below the selected profile's quorum. `--fresh-sources` gives this run an empty dedicated source
+cache so API calls are real network executions; without it, live mode is cache-first.
 
 The output path must be new and workspace-relative. A repeated question should use `--reuse-context`
 and a new output path; the context file and run events live under ignored `data/fods/`. Each run
 also writes a self-contained HTML visualization beside its JSONL event log. It visualizes the DAG
 readiness levels, per-task state, and measured execution lanes from that run. Replaying events may
 recreate the same view, but only live or deterministic simulated execution demonstrates dispatch.
+
+`enrich` accepts only an Ollama model and schedules one strict-schema extraction task per batch of
+1–5 papers (maximum 30 papers, 8 workers, 30–600 second total budget). It writes an immutable derived artifact and caches only
+validated outputs for the matching context hash, model, prompt, and paper hashes. It does not alter
+the fast-answer context. `discover-references` is capped at one hop, 10 seed papers, 2 provider
+adapters, and 20 candidates per seed/provider. It records resolver results and preserves provider
+citation edges separately from model-inferred concept relations. Use `--source openalex` or
+`--source semantic_scholar` to select the preferred provider and `--source-limit 1` to keep the
+run to one provider. Each resolver call and the overall run are bounded by `--time-budget`
+(10–300 seconds). Live discovery uses a new per-run cache. The Phase 2.1 bounded OpenAlex check
+resolved five reference records in about 1.3 seconds; the local Ollama endpoint was unavailable,
+so live enrichment was not verified.
 
 ---
 

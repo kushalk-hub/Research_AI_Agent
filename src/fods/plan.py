@@ -93,20 +93,71 @@ def validate_plan(
                     ready.append(child)
     if visited != len(by_id):
         raise PlanError("dependency graph is not acyclic")
-    _validate_research_flow(plan, by_id)
+    if plan.workflow == "research":
+        _validate_research_flow(plan, by_id)
+    elif plan.workflow == "enrichment":
+        _validate_enrichment_flow(plan)
+    else:
+        _validate_reference_flow(plan)
     if workspace is not None:
         root = workspace.resolve()
         destination = (root / plan.output_path).resolve()
         if destination == root or not destination.is_relative_to(root):
             raise PlanError("output path must resolve to a file inside the approved workspace")
-        if destination.exists():
+        if destination.exists() and plan.workflow == "research":
             raise PlanError(f"output path already exists; choose a new path: {plan.output_path}")
     return levels
+
+
+def _validate_enrichment_flow(plan: TaskPlan) -> None:
+    loads = [task for task in plan.tasks if task.tool == "load_saved_context"]
+    batches = [task for task in plan.tasks if task.tool == "extract_enrichment_batch"]
+    saves = [task for task in plan.tasks if task.tool == "save_enrichment"]
+    if len(loads) != 1 or not batches or len(saves) != 1:
+        raise PlanError(
+            "enrichment workflow requires one context load, extraction batches, and one save"
+        )
+    load = loads[0]
+    if load.depends_on:
+        raise PlanError("enrichment context load must be a root task")
+    for batch in batches:
+        if batch.depends_on != [load.id]:
+            raise PlanError("each extraction batch must depend directly on the loaded context")
+    expected = {load.id, *(batch.id for batch in batches)}
+    if set(saves[0].depends_on) != expected:
+        raise PlanError("enrichment save must depend on the context and every extraction batch")
+    if len(plan.tasks) != len(batches) + 2:
+        raise PlanError("enrichment workflow contains an unsupported task")
+
+
+def _validate_reference_flow(plan: TaskPlan) -> None:
+    loads = [task for task in plan.tasks if task.tool == "load_saved_context"]
+    lookups = [task for task in plan.tasks if task.tool == "discover_references"]
+    saves = [task for task in plan.tasks if task.tool == "save_reference_context"]
+    if len(loads) != 1 or len(saves) != 1:
+        raise PlanError("reference workflow requires one context load and one snapshot save")
+    load = loads[0]
+    if load.depends_on:
+        raise PlanError("reference context load must be a root task")
+    if any(task.depends_on != [load.id] for task in lookups):
+        raise PlanError("reference lookup tasks must depend directly on the loaded context")
+    expected = {load.id, *(task.id for task in lookups)}
+    if set(saves[0].depends_on) != expected:
+        raise PlanError("reference snapshot save must depend on the context and every lookup task")
+    if len(plan.tasks) != len(lookups) + 2:
+        raise PlanError("reference workflow contains an unsupported task")
 
 
 def _validate_research_flow(plan: TaskPlan, by_id: dict[str, Any]) -> None:
     """Require the evidence → citation-check → write safety chain."""
     source_tasks = [task for task in plan.tasks if task.tool.startswith("search_")]
+    initial_source_tasks = [
+        task for task in source_tasks if int(task.args.get("round_index", 0)) == 0
+    ]
+    expanded_source_tasks = [
+        task for task in source_tasks if int(task.args.get("round_index", 0)) > 0
+    ]
+    checkpoints = [task for task in plan.tasks if task.tool == "acquisition_checkpoint"]
     context_loads = [task for task in plan.tasks if task.tool == "load_saved_context"]
     if context_loads:
         if source_tasks or len(context_loads) != 1:
@@ -114,12 +165,22 @@ def _validate_research_flow(plan: TaskPlan, by_id: dict[str, Any]) -> None:
                 "context reuse plans must have one load task and no source search tasks"
             )
     else:
-        if len(source_tasks) < 2:
+        if len(initial_source_tasks) < 2:
             raise PlanError("research plan must include at least two independent source tasks")
-        if any(task.depends_on for task in source_tasks):
+        if any(task.depends_on for task in initial_source_tasks):
             raise PlanError(
-                "academic source tasks must be independent so the runtime can fan them out"
+                "round-zero academic source tasks must be independent so FODS can fan them out"
             )
+        if expanded_source_tasks:
+            if len(checkpoints) != 1:
+                raise PlanError("expanded source tasks require one acquisition checkpoint")
+            checkpoint = checkpoints[0]
+            if set(checkpoint.depends_on) != {task.id for task in initial_source_tasks}:
+                raise PlanError("acquisition checkpoint must depend on every round-zero task")
+            if any(task.depends_on != [checkpoint.id] for task in expanded_source_tasks):
+                raise PlanError("expanded source tasks must depend on the acquisition checkpoint")
+        elif checkpoints:
+            raise PlanError("acquisition checkpoint is only valid when expansion tasks exist")
 
     required = {
         "retrieve_evidence": "retrieve",
@@ -127,6 +188,8 @@ def _validate_research_flow(plan: TaskPlan, by_id: dict[str, Any]) -> None:
         "validate_citations": "citation validation",
         "write_cited_brief": "brief write",
     }
+    if len(checkpoints) > 1:
+        raise PlanError("research plan may include at most one acquisition checkpoint")
     one_task: dict[str, Any] = {}
     for tool, label in required.items():
         matches = [task for task in plan.tasks if task.tool == tool]

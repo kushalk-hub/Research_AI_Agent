@@ -1,8 +1,10 @@
 # Research Agent + FODS Runtime: Architecture and Demo Plan
 
-**Status:** approved implementation specification (2026-10-28); `docs/master.md` is the scope authority.
+**Status:** implementation specification (2026-10-28), updated for the backend-first research
+baseline; `docs/master.md` remains the scope authority. See
+`docs/research_architecture_and_cli_acceptance.md` for the active CLI gate.
 
-**Implementation status (2026-10-28):** the first vertical slice and interactive local web
+**Implementation status (2026-10-29):** the first vertical slice and interactive local web
 visualizer are implemented. The browser subscribes to the canonical runtime event stream through
 the local Python API; it does not schedule tasks or call model/source providers. The runtime has
 been exercised with a live Qwen/Ollama plan and Gemini answer, as well as deterministic source,
@@ -10,6 +12,13 @@ queue, cycle, bounded-failure, citation-failure, reuse, and replay scenarios. Th
 stores paper metadata and abstracts; it does not yet perform a FODS per-paper extraction task or
 build the concept graph. Live API/source behavior depends on local configuration and provider
 availability; the repeatable fixture path is the guaranteed demo path.
+
+The current backend improvement milestone fixes per-query limits, adds validated Quick/Deep
+research profiles, bounded query expansion, candidate and time stops, conservative deduplication,
+transparent relevance/coverage ranking, immutable reusable context snapshots, an evidence-size
+budget, and a citation-to-paper trace. These changes do not claim semantic citation support or
+concept-graph quality. The frontend redesign is deferred until CLI acceptance and human-reviewed
+retrieval evaluation are complete; existing frontend files are not in scope for this milestone.
 
 ## 1. Project goal
 
@@ -71,7 +80,7 @@ flowchart TD
 
 1. **Understand the request.** Identify topic, question intent (lineage, comparison, gaps, overview), freshness need, and a small initial evidence budget. Use deterministic classification first; clarify only when essential scope is missing.
 2. **Create and validate a small DAG.** Example: `search 3 sources in parallel → normalize/dedupe → save answerable context → retrieve for question → draft cited answer`. Validate IDs, dependencies, and cycles before any tool call. Optional enrichment is not a prerequisite for the first answer.
-3. **Search a bounded set concurrently.** The current first slice schedules 2–5 independent academic source tasks (default 3), with a two-source quorum and a bounded worker count. Expand the paper cap and query breadth only after profiling the target machine. Show per-source timing, cache status, count, and errors.
+3. **Search a bounded set concurrently.** Quick schedules three independent academic source tasks and requires two successful sources. Deep schedules five sources, up to four bounded queries, and requires three sources. Both use a bounded worker count, candidate cap, and elapsed-time budget. Every source/query operation is its own FODS task. Show per-task timing, cache status, result count, and errors.
 4. **Normalize and consolidate without an LLM.** Merge by DOI, then normalized title; preserve source IDs/URLs and conflicting fields. Rank deterministically by query match, recency, abstract availability, and citation metadata. Do not spend model calls scoring papers that are immediately trimmed.
 5. **Persist the first answerable context.** Store focused queries, metadata, abstracts, provenance, citation links, retrieval index, build version, and timestamps. Use content hashes so unchanged records remain reusable. The first context does not wait for concept extraction.
 6. **Answer from a small evidence slice.** The first slice selects evidence with bounded lexical scoring from the saved abstracts. Send only selected evidence to the configured answer model (Gemini when explicitly enabled) and validate citations against the selected cards.
@@ -91,8 +100,8 @@ Cold Ollama loading and academic-source latency can exceed these goals. Display 
 
 Speed controls:
 
-- In live mode, accept a usable context after a two-source quorum and cancel any outstanding optional source request; fewer than two successful sources blocks answering and writing.
-- Start with 12–20 papers and a small query set; expand only when the initial evidence is weak or the user requests breadth. Make the cap configurable.
+- Quick mode requires two successful sources and stops at its target or configured time/candidate limit. Deep mode requires three sources and continues through its bounded expansion wave toward its larger target. Profile values and stop reasons are recorded in the run.
+- Keep the source, candidate, retained-paper, evidence-card, and prompt-size limits configurable within validated bounds. Profile defaults are recorded in `docs/research_architecture_and_cli_acceptance.md`.
 - Remove LLM relevance scoring from the critical path. Use deterministic ranking for the first cap; keep optional reranking only if evaluation shows a real quality improvement.
 - Batch concept extraction to reduce prompt/model overhead, but benchmark 3–5 papers per call against one-paper calls on the actual local model before choosing a batch size. Keep batches small enough to validate outputs reliably.
 - Load Ollama before the demo and limit concurrency to what the machine can serve. More concurrent requests to one local model may increase latency rather than reduce it.
@@ -266,4 +275,15 @@ The demo is complete only when:
 - FIFO and fixed-priority scheduling are compared on the same ready set; cycle rejection and bounded failure recovery are shown.
 - Fixture, live context, answer, and optional enrichment timings are reported separately. Proposed latency targets are not described as measured results.
 
-The implementation order is the smallest vertical slice first: validated plan → runtime-controlled source tasks → reusable evidence context → cited answer → guarded file output. That slice, offline trace view, and interactive browser visualizer are implemented. Live-provider rehearsal has produced a Qwen-planned/Gemini-answered run; measured timings are run-specific, not general performance guarantees. The keyless cycle, scheduling, retry, citation-guard, and context-reuse cases are covered by focused checks. The current research context uses abstracts and metadata; extraction and concept graph enrichment remain future work. Do not broadly rewrite `rla`; verify each reused interface and the stored data before depending on it.
+The implementation order is the smallest vertical slice first: validated plan → runtime-controlled source tasks → reusable evidence context → cited answer → guarded file output. That slice, offline trace view, and interactive browser visualizer are implemented. Live-provider rehearsal has produced a Qwen-planned/Gemini-answered run; measured timings are run-specific, not general performance guarantees. The keyless cycle, scheduling, retry, citation-guard, and context-reuse cases are covered by focused checks. The fast research context uses abstracts and metadata; enrichment is an optional follow-on workflow described below. Do not broadly rewrite `rla`; verify each reused interface and the stored data before depending on it.
+
+## Phase 2 backend update (2026-10)
+
+The abstract-backed context remains the fast path. Optional `fods enrich` runs local Ollama structured
+extraction as bounded FODS batch tasks with content-hash resume and a separate immutable artifact;
+it does not delay or mutate the first answer. Optional `fods discover-references` adds a one-hop,
+time-bounded provider-resolution stage and creates a child context snapshot. Provider citation edges
+are stored separately from model-inferred concept relations. These additions are backend/CLI only;
+the frontend is unchanged. See `docs/research_architecture_and_cli_acceptance.md` and
+`docs/retrieval_benchmark_baseline.md` for effective caps, check outcomes, and the still-pending
+human relevance review.

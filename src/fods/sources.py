@@ -12,6 +12,7 @@ from rla.store.cache import Cache
 @dataclass
 class LiveSourcePool:
     searchers: dict[str, Any]
+    reference_resolvers: dict[str, Any]
     client: Any
 
     async def close(self) -> None:
@@ -39,5 +40,11 @@ def build_live_source_pool(settings: Settings, cache: Cache, limit: int = 3) -> 
     client = next(iter(sources.values())).fetcher.client
     return LiveSourcePool(
         searchers={name: source.search for name, source in selected.items()},
+        reference_resolvers={
+            name: source.references
+            for name, source in selected.items()
+            if name in {"semantic_scholar", "openalex"}
+            and callable(getattr(source, "references", None))
+        },
         client=client,
     )
