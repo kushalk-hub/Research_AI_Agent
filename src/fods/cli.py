@@ -7,9 +7,10 @@ import os
 import re
 import time
 import uuid
+from functools import wraps
 from pathlib import Path
 from threading import Event
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -24,16 +25,104 @@ from fods.plan import PlanError
 from fods.planner import LLMPlanner, canonicalize_llm_research_plan, deterministic_plan
 from fods.research import ResearchProfile, build_query_plan, profile_for
 from fods.runtime import run_plan
-from fods.sources import build_live_source_pool
+from fods.sources import build_live_source_pool, selected_live_source_names
 from fods.tools import ToolContext, create_registry
 from fods.visualize import write_run_html
 from rla.config import Settings, get_settings
 from rla.llm.factory import build_client
 from rla.models import content_hash
 from rla.store.cache import Cache, CostTracker
+from rla.store.rate_limits import (
+    LiveCollectionInProgress,
+    LiveCollectionLock,
+    RequestAttemptBudget,
+    provider_lock_directory,
+    provider_policy,
+)
+
+# Graph command group
+graph_app = typer.Typer(
+    add_completion=False, no_args_is_help=True, help="Knowledge graph operations."
+)
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="FODS research-agent runtime.")
+app.add_typer(graph_app, name="graph")
 console = Console()
+FODS_TASK_MAX_ATTEMPTS = 2
+
+
+def _serialize_graph_mutation(command):
+    """Serialize build/update operations across processes per topic on Windows too."""
+
+    @wraps(command)
+    def wrapped(*args, **kwargs):
+        from fods.knowledge_graph import topic_lock
+
+        topic = kwargs.get("topic") or (args[0] if args else "")
+        settings = get_settings()
+        lock_path = (
+            settings.data_dir
+            / "fods"
+            / "knowledge_graph"
+            / content_hash(topic)[:16]
+            / ".mutation.lock"
+        )
+        with topic_lock(lock_path):
+            return command(*args, **kwargs)
+
+    return wrapped
+
+
+@app.command("preflight")
+def preflight_command(
+    profile: Annotated[
+        str, typer.Option(help="Research profile to inspect: quick or deep.")
+    ] = "quick",
+    pair: Annotated[
+        bool, typer.Option(help="Report the combined Q01 Quick/Deep upper bound.")
+    ] = False,
+) -> None:
+    """Report sources, provider pacing, and hard request ceilings without network calls."""
+    if profile not in {"quick", "deep"}:
+        raise typer.BadParameter("profile must be quick or deep")
+    settings = get_settings()
+    choices = ["quick", "deep"] if pair else [profile]
+    selected = {}
+    total_tasks = 0
+    total_attempts = 0
+    console.print("[bold]OFFLINE PROVIDER PREFLIGHT[/] — no network requests will be sent")
+    console.print(
+        f"Workspace provider-lock directory: {provider_lock_directory(settings.data_dir)}"
+    )
+    console.print(f"HTTP attempts per source request: {settings.max_retries}")
+    console.print(f"FODS task attempts per source task: {FODS_TASK_MAX_ATTEMPTS}")
+    for name in choices:
+        policy = profile_for(name)
+        sources = selected_live_source_names(settings, policy.source_limit)
+        tasks = len(sources) * policy.query_count
+        attempts = tasks * FODS_TASK_MAX_ATTEMPTS * max(0, settings.max_retries)
+        selected[name] = sources
+        total_tasks += tasks
+        total_attempts += attempts
+        console.print(
+            f"{name}: sources={sources}; planned_source_query_tasks={tasks}; "
+            f"hard_http_attempt_budget={attempts}; scheduler_concurrency=3"
+        )
+        for source in sources:
+            rule = provider_policy(source)
+            console.print(
+                f"  {source}: min_start_interval={rule.min_interval:g}s; "
+                f"max_in_flight={rule.max_in_flight or 'not provider-limited'}; "
+                f"header_policy={rule.header_policy}; cross_process_lock=enabled"
+            )
+    console.print(
+        f"total_planned_source_query_tasks={total_tasks}; "
+        f"total_hard_http_attempt_budget={total_attempts}"
+    )
+    console.print(
+        f"Gemini_opt_in={'enabled' if os.getenv('RLA_FODS_ALLOW_GEMINI') == '1' else 'disabled'}; "
+        "fixture_planner_model_calls=0; answer_model_calls=0 when Gemini opt-in is disabled"
+    )
 
 
 def _aux_output_id(data_dir: Path, topic: str, context_id: str) -> str:
@@ -96,7 +185,7 @@ async def _run_auxiliary_plan(
             metadata={
                 "context_id": context_id,
                 "enrichment_model": model,
-                "enrichment_prompt_version": "fods-enrichment-prompt-v1",
+                "enrichment_prompt_version": "fods-enrichment-prompt-v4",
                 "reference_timeout_seconds": reference_timeout_seconds,
                 "source_cache_mode": "fresh" if live_reference_sources else "configured",
             },
@@ -288,18 +377,29 @@ def discover_references_command(
         workflow="reference_discovery",
         tasks=tasks,
     )
-    succeeded = asyncio.run(
-        _run_auxiliary_plan(
-            plan=plan,
-            settings=settings,
-            context_id=context_id,
-            live_reference_sources=bool(hops),
-            source_limit=max(2, source_limit),
-            reference_timeout_seconds=time_budget,
-            workflow_budget_seconds=time_budget,
-            concurrency=workers,
+
+    def execute_discovery():
+        return asyncio.run(
+            _run_auxiliary_plan(
+                plan=plan,
+                settings=settings,
+                context_id=context_id,
+                live_reference_sources=bool(hops),
+                source_limit=max(2, source_limit),
+                reference_timeout_seconds=time_budget,
+                workflow_budget_seconds=time_budget,
+                concurrency=workers,
+            )
         )
-    )
+
+    if hops:
+        try:
+            with LiveCollectionLock(settings.data_dir):
+                succeeded = execute_discovery()
+        except LiveCollectionInProgress as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    else:
+        succeeded = execute_discovery()
     if not succeeded:
         raise typer.Exit(code=1)
 
@@ -326,6 +426,19 @@ def _print_event(event: RuntimeEvent) -> None:
     }.get(event.kind, "cyan")
     timing = event.payload.get("duration_ms", event.payload.get("elapsed_ms"))
     suffix = f" ({timing} ms)" if timing is not None else ""
+    if event.kind == "source_http_attempt":
+        suffix += (
+            f" [{event.payload.get('provider')}:{event.payload.get('endpoint_class')} "
+            f"attempt={event.payload.get('attempt')} wait="
+            f"{event.payload.get('actual_wait', 0)}s]"
+        )
+    elif event.kind == "source_http_response":
+        suffix += (
+            f" [{event.payload.get('provider')} status={event.payload.get('status')} "
+            f"retry={event.payload.get('retry_decision')}]"
+        )
+    elif event.kind in {"source_rate_limit_stopped", "source_http_budget_stopped"}:
+        suffix += f" [{event.payload.get('provider')} stop={event.payload.get('reason')}]"
     console.print(f"[{event.seq:03}] [{style}]{event.kind:<20}[/] {event.message}{suffix}")
 
 
@@ -374,6 +487,33 @@ def _print_research_summary(result, query_plan, policy: ResearchProfile) -> None
             if event["kind"] == "model_call_completed" and event["payload"].get("model")
         )
     )
+    transport = next(
+        (event["payload"] for event in result.events if event["kind"] == "run_finished"),
+        {},
+    )
+    provider_telemetry: dict[str, dict[str, Any]] = {}
+    for item in result.events:
+        payload = item.get("payload", {})
+        if item["kind"] not in {"source_http_attempt", "source_http_response"}:
+            continue
+        provider = str(payload.get("provider", "unknown"))
+        entry = provider_telemetry.setdefault(
+            provider,
+            {
+                "http_attempts": 0,
+                "statuses": [],
+                "waits_seconds": [],
+                "rate_limit_headers": [],
+            },
+        )
+        if item["kind"] == "source_http_attempt":
+            entry["http_attempts"] += 1
+            entry["waits_seconds"].append(payload.get("actual_wait", 0))
+        else:
+            if payload.get("status") is not None:
+                entry["statuses"].append(payload["status"])
+            if payload.get("rate_limit_headers"):
+                entry["rate_limit_headers"].append(payload["rate_limit_headers"])
     summary = {
         "profile": policy.profile,
         "intent": query_plan.intent.value,
@@ -391,6 +531,14 @@ def _print_research_summary(result, query_plan, policy: ResearchProfile) -> None
         "context_snapshot_id": context.get("context_hash", ""),
         "evidence_type": context.get("evidence_type", "abstract_and_metadata"),
         "source_errors": source_errors,
+        "http_attempts": {
+            "total": transport.get("http_attempts", 0),
+            "by_provider": transport.get("http_attempts_by_provider", {}),
+            "hard_budget": transport.get("http_attempt_budget"),
+            "used": transport.get("http_attempt_budget_used"),
+            "max_in_flight_observed": transport.get("provider_max_in_flight_observed", {}),
+            "telemetry": provider_telemetry,
+        },
         "cache_policy": context.get("source_yield", {}),
         "extraction": {"status": "not_requested", "extracted": 0},
         "actual_models": models,
@@ -471,6 +619,19 @@ async def _execute(
         reuse_context = False
     if context_id:
         reuse_context = True
+    planned_source_names = (
+        selected_live_source_names(settings, effective_source_limit)
+        if mode == "live" and not reuse_context
+        else []
+    )
+    planned_source_query_tasks = len(planned_source_names) * policy.query_count
+    http_attempt_budget = (
+        RequestAttemptBudget(
+            max(1, planned_source_query_tasks * FODS_TASK_MAX_ATTEMPTS * settings.max_retries)
+        )
+        if planned_source_query_tasks
+        else None
+    )
     run_workspace = (workspace or Path.cwd()).resolve()
     run_id = run_id or uuid.uuid4().hex[:12]
     run_data = settings.data_dir / "fods"
@@ -488,6 +649,10 @@ async def _execute(
         schedule=schedule,
         concurrency=concurrency,
         source_limit=effective_source_limit,
+        planned_source_query_tasks=planned_source_query_tasks,
+        http_attempt_budget=(http_attempt_budget.maximum if http_attempt_budget else 0),
+        task_attempt_limit=FODS_TASK_MAX_ATTEMPTS,
+        source_http_retry_attempts=settings.max_retries,
         research_profile=policy.model_dump(mode="json"),
         context_mode="reuse" if reuse_context else context_mode,
         context_id=context_id,
@@ -520,7 +685,12 @@ async def _execute(
                     settings.data_dir / "fods" / "source_cache" / f"{run_id}.db"
                 )
             source_cache = separate_source_cache or cache
-            pool = build_live_source_pool(settings, source_cache, limit=effective_source_limit)
+            pool = build_live_source_pool(
+                settings,
+                source_cache,
+                limit=effective_source_limit,
+                attempt_budget=http_attempt_budget,
+            )
             source_searchers = pool.searchers
         else:
             raise ValueError("mode must be 'live' or 'simulate'")
@@ -646,6 +816,7 @@ async def _execute(
                 "answer_model": answer_model,
                 "force_invalid_citation": invalid_citation,
                 "pre_execution_ms": round((time.perf_counter() - command_started) * 1000, 1),
+                "http_attempt_budget": http_attempt_budget,
             },
         )
         if print_cli:
@@ -790,30 +961,45 @@ def run_command(
         raise typer.BadParameter(str(exc)) from exc
     if context_mode not in {"auto", "build", "reuse", "refresh"}:
         raise typer.BadParameter("context-mode must be auto, build, reuse, or refresh")
+    if output and (Path.cwd() / output).exists():
+        raise typer.BadParameter(f"refusing to overwrite existing brief: {output}")
+    if event_log is not None and event_log.exists():
+        raise typer.BadParameter(f"refusing to overwrite existing event log: {event_log}")
     request_text = request or f"Research {topic} and answer: {question}"
-    succeeded = asyncio.run(
-        _execute(
-            topic=topic,
-            question=question,
-            output=output,
-            request=request_text,
-            mode=mode,
-            planner_mode=planner,
-            schedule=schedule,
-            concurrency=concurrency,
-            reuse_context=reuse_context,
-            fail_sources=set(fail_source or []),
-            inject_cycle=inject_cycle,
-            invalid_citation=invalid_citation,
-            simulated_delay=delay_ms / 1000,
-            event_file=event_log,
-            fresh_sources=fresh_sources,
-            source_limit=policy.source_limit,
-            research_policy=policy,
-            context_mode="reuse" if reuse_context else context_mode,
-            context_id=context_id,
+
+    def execute():
+        return asyncio.run(
+            _execute(
+                topic=topic,
+                question=question,
+                output=output,
+                request=request_text,
+                mode=mode,
+                planner_mode=planner,
+                schedule=schedule,
+                concurrency=concurrency,
+                reuse_context=reuse_context,
+                fail_sources=set(fail_source or []),
+                inject_cycle=inject_cycle,
+                invalid_citation=invalid_citation,
+                simulated_delay=delay_ms / 1000,
+                event_file=event_log,
+                fresh_sources=fresh_sources,
+                source_limit=policy.source_limit,
+                research_policy=policy,
+                context_mode="reuse" if reuse_context else context_mode,
+                context_id=context_id,
+            )
         )
-    )
+
+    if mode == "live":
+        try:
+            with LiveCollectionLock(get_settings().data_dir):
+                succeeded = execute()
+        except LiveCollectionInProgress as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    else:
+        succeeded = execute()
     if not succeeded:
         raise typer.Exit(code=1)
 
@@ -856,6 +1042,308 @@ def serve_command(
         console.print("Stopping FODS visualizer…")
     finally:
         server.server_close()
+
+
+@graph_app.command("build")
+@_serialize_graph_mutation
+def graph_build_command(
+    topic: Annotated[str, typer.Option(help="Research topic to build the graph for.")],
+    context_id: Annotated[str, typer.Option(help="Context snapshot ID; omit to use latest.")] = "",
+    output_json: Annotated[
+        str, typer.Option("--output-json", help="Output JSON path for graph.")
+    ] = "",
+    force: Annotated[bool, typer.Option("--force", help="Overwrite existing graph files.")] = False,
+) -> None:
+    """Build a deterministic graph snapshot from saved enrichment artifacts."""
+    import json
+    import time
+
+    from fods.knowledge_graph import (
+        classify_inputs,
+        empty_snapshot,
+        publish,
+        statistics,
+        update_snapshot,
+    )
+    from fods.tools import read_context_snapshot
+
+    settings = get_settings()
+    context = read_context_snapshot(settings.data_dir, topic, context_id)
+    papers, enrichments, eligibility = classify_inputs(settings.data_dir, topic, context)
+    if not enrichments:
+        raise typer.BadParameter(
+            "No current, hash-matched enrichments found for this topic/context."
+        )
+    topic_key = content_hash(topic)[:16]
+    path = (
+        Path(output_json)
+        if output_json
+        else settings.data_dir / "fods" / "knowledge_graph" / topic_key / "graph.json"
+    )
+    if path.exists() and not force:
+        raise typer.BadParameter("Graph snapshot already exists; pass --force to rebuild it.")
+    import tracemalloc
+
+    tracemalloc.start()
+    start = time.perf_counter()
+    graph, changes = update_snapshot(empty_snapshot(topic), papers, enrichments)
+    build_ms = round((time.perf_counter() - start) * 1000, 3)
+    peak_memory_bytes = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    graph["manifest"].update({"context_id": context["context_hash"], "build_ms": build_ms})
+    publish_start = time.perf_counter()
+    publish(path, graph)
+    publish_ms = round((time.perf_counter() - publish_start) * 1000, 3)
+    stats = statistics(graph)
+    report_path = settings.data_dir / "fods" / "knowledge_graph" / topic_key / "performance.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "initial_build_ms": build_ms,
+                "initial_publish_ms": publish_ms,
+                "initial_total_ms": round(build_ms + publish_ms, 3),
+                "peak_memory_bytes": peak_memory_bytes,
+                "normalization_and_indexing_ms": changes["indexing_ms"],
+                "validation_ms": changes["validation_ms"],
+                "records_inspected": changes["inspected"],
+                "eligible_papers": changes["processed"],
+                "snapshot_bytes": path.stat().st_size,
+                "stats": stats,
+                "eligibility": eligibility,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    console.print(
+        f"Built graph: {stats['nodes']} nodes, {stats['edges']} edges; "
+        f"{changes['processed']} eligible papers in {build_ms} ms"
+    )
+    console.print(f"Snapshot: {path}")
+    console.print(f"Measurements: {report_path}")
+
+
+@graph_app.command("update")
+@_serialize_graph_mutation
+def graph_update_command(
+    topic: Annotated[str, typer.Option(help="Research topic to update the graph for.")],
+    context_id: Annotated[str, typer.Option(help="Context snapshot ID; omit to use latest.")] = "",
+    delete_paper: Annotated[
+        list[str] | None,
+        typer.Option("--delete-paper", help="Explicitly remove a paper ID from the graph."),
+    ] = None,
+) -> None:
+    """Apply hash-detected graph changes and atomically publish the result."""
+    import json
+    import time
+
+    from fods.knowledge_graph import classify_inputs, publish, statistics, update_snapshot
+    from fods.tools import read_context_snapshot
+
+    settings = get_settings()
+    context = read_context_snapshot(settings.data_dir, topic, context_id)
+    papers, enrichments, eligibility = classify_inputs(settings.data_dir, topic, context)
+    topic_key = content_hash(topic)[:16]
+    path = settings.data_dir / "fods" / "knowledge_graph" / topic_key / "graph.json"
+    if not path.exists():
+        raise typer.BadParameter("No graph snapshot exists. Run 'fods graph build' first.")
+    try:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+        start = time.perf_counter()
+        graph, changes = update_snapshot(
+            previous, papers, enrichments, deleted=set(delete_paper or [])
+        )
+        graph["manifest"].update(
+            {
+                "context_id": context["context_hash"],
+                "update_ms": round((time.perf_counter() - start) * 1000, 3),
+            }
+        )
+        publish_start = time.perf_counter()
+        publish(path, graph)
+        changes["publish_ms"] = round((time.perf_counter() - publish_start) * 1000, 3)
+        changes["total_ms"] = round(changes["elapsed_ms"] + changes["publish_ms"], 3)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        raise typer.BadParameter(
+            f"Graph update was rejected; previous snapshot remains intact: {exc}"
+        ) from exc
+    stats = statistics(graph)
+    report_path = path.with_name("performance.json")
+    report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+    report.setdefault("updates", []).append(
+        {**changes, "snapshot_bytes": path.stat().st_size, "eligibility": eligibility}
+    )
+    report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    console.print(
+        f"Updated: {changes['new']} new, {changes['changed']} changed, "
+        f"{changes['deleted']} deleted; {changes['processed']} reprocessed "
+        f"in {changes['elapsed_ms']} ms"
+    )
+    console.print(f"Graph: {stats['nodes']} nodes, {stats['edges']} edges; snapshot: {path}")
+
+
+@graph_app.command("query")
+def graph_query_command(
+    topic: Annotated[str, typer.Option(help="Research topic to query.")],
+    concept: Annotated[str, typer.Option("--concept", help="Find papers for a concept.")] = "",
+    paper: Annotated[str, typer.Option("--paper", help="Find relations for a paper.")] = "",
+    concept_a: Annotated[
+        str, typer.Option("--concept-a", help="First concept for shared concepts query.")
+    ] = "",
+    concept_b: Annotated[
+        str, typer.Option("--concept-b", help="Second concept for shared concepts query.")
+    ] = "",
+    method: Annotated[str, typer.Option("--method", help="Find papers using a method.")] = "",
+    finding: Annotated[
+        str, typer.Option("--finding", help="Find papers reporting a finding.")
+    ] = "",
+    limitation: Annotated[
+        str, typer.Option("--limitation", help="Find papers with a limitation.")
+    ] = "",
+    cites: Annotated[str, typer.Option("--cites", help="Find papers citing a paper.")] = "",
+    max_depth: Annotated[int, typer.Option("--max-depth", min=0, max=5)] = 2,
+    max_nodes: Annotated[int, typer.Option("--max-nodes", min=1, max=500)] = 50,
+    max_edges: Annotated[int, typer.Option("--max-edges", min=1, max=1000)] = 100,
+    output: Annotated[str, typer.Option("--output", help="Output JSON file for results.")] = "",
+    max_evidence: Annotated[int, typer.Option("--max-evidence", min=1, max=200)] = 20,
+) -> None:
+    """Query the existing graph snapshot without rebuilding or making model calls."""
+    import json
+
+    from fods.knowledge_graph import query as run_graph_query
+
+    settings = get_settings()
+    path = settings.data_dir / "fods" / "knowledge_graph" / content_hash(topic)[:16] / "graph.json"
+    if not path.exists():
+        raise typer.BadParameter("No graph snapshot found. Run 'fods graph build' first.")
+    selected = [
+        ("CONCEPT", concept),
+        ("PAPER", paper),
+        ("METHOD", method),
+        ("FINDING", finding),
+        ("LIMITATION", limitation),
+        ("CITED_BY", cites),
+    ]
+    selected = [(kind, value) for kind, value in selected if value]
+    if concept_a and concept_b:
+        selected.append(("SHARED", f"{concept_a}|{concept_b}"))
+    if len(selected) != 1:
+        raise typer.BadParameter(
+            "Specify one query: --concept, --paper, --method, --finding, --limitation, "
+            "--cites, or --concept-a with --concept-b."
+        )
+    snapshot = json.loads(path.read_text(encoding="utf-8"))
+    start = time.perf_counter()
+    result = run_graph_query(
+        snapshot,
+        kind=selected[0][0],
+        value=selected[0][1],
+        max_depth=max_depth,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+        max_evidence=max_evidence,
+    )
+    elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
+    result["query_elapsed_ms"] = elapsed_ms
+    if output:
+        Path(output).write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    else:
+        console.print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+@graph_app.command("stats")
+def graph_stats_command(topic: Annotated[str, typer.Option()]) -> None:
+    """Show the current graph manifest and node/edge counts."""
+    import json
+
+    from fods.knowledge_graph import statistics
+
+    path = (
+        get_settings().data_dir
+        / "fods"
+        / "knowledge_graph"
+        / content_hash(topic)[:16]
+        / "graph.json"
+    )
+    if not path.exists():
+        raise typer.BadParameter("No graph snapshot found. Run 'fods graph build' first.")
+    snapshot = json.loads(path.read_text(encoding="utf-8"))
+    console.print_json(
+        json.dumps(
+            {"path": str(path), **statistics(snapshot), "manifest": snapshot.get("manifest", {})}
+        )
+    )
+
+
+@graph_app.command("follow-up")
+def graph_followup_command(
+    topic: Annotated[str, typer.Option(help="Research topic whose saved graph to query.")],
+    question: Annotated[str, typer.Option(help="A supported graph follow-up question.")],
+    max_depth: Annotated[int, typer.Option(min=0, max=5)] = 3,
+    max_nodes: Annotated[int, typer.Option(min=1, max=500)] = 200,
+    max_edges: Annotated[int, typer.Option(min=1, max=1000)] = 500,
+    max_evidence: Annotated[int, typer.Option(min=1, max=200)] = 50,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Answer a supported follow-up from the existing graph and its stored evidence."""
+    import json
+
+    from fods.graph_followup import route_question, run_followup
+
+    route = route_question(question)
+    if route is None:
+        typer.echo(
+            "Unsupported graph follow-up. Try: 'Which papers use GAT?', "
+            "'Which papers discuss graph attention networks?', "
+            "'What findings are reported for graph attention networks?', "
+            "'What limitations are mentioned for graph attention networks?', "
+            "'Which papers cite <paper-id>?', or "
+            "'What concepts are shared between <paper-id> and <paper-id>?'. "
+            "Use 'fods graph query' for a structured query."
+        )
+        return
+
+    path = (
+        get_settings().data_dir
+        / "fods"
+        / "knowledge_graph"
+        / content_hash(topic)[:16]
+        / "graph.json"
+    )
+    if not path.exists():
+        typer.echo(
+            f"No graph snapshot found for {topic!r}. Run 'fods graph build --topic {topic!r}' "
+            "after saving enrichments. Follow-up never builds a graph automatically."
+        )
+        return
+    snapshot = json.loads(path.read_text(encoding="utf-8"))
+    response = run_followup(
+        snapshot,
+        route,
+        max_depth=max_depth,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+        max_evidence=max_evidence,
+    )
+    response["question"] = question
+    if json_output:
+        typer.echo(json.dumps(response, indent=2, ensure_ascii=False))
+        return
+
+    typer.echo(response["summary"])
+    for record in response["evidence_records"]:
+        segments = ", ".join(record["segment_ids"])
+        typer.echo(
+            f"- {record['paper_title']} ({record['paper_id']}) — "
+            f"{record['relationship']}: {record['item']}\n"
+            f"  Evidence {segments}: {record['excerpt']}"
+        )
+    for record in response["bibliographic_records"]:
+        typer.echo(
+            f"- {record['citing_paper_title']} ({record['citing_paper_id']}) cites "
+            f"{record['cited_paper_title']} ({record['cited_paper_id']}) "
+            "[stored bibliographic reference]"
+        )
 
 
 if __name__ == "__main__":

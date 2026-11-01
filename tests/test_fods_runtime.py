@@ -76,6 +76,21 @@ def test_cycle_is_rejected_before_any_tool_call(tmp_path):
     assert calls == 0
 
 
+def test_normal_research_runtime_never_calls_graph_mutations(tmp_path, monkeypatch):
+    import fods.knowledge_graph as graph
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("normal research invoked an optional graph operation")
+
+    monkeypatch.setattr(graph, "update_snapshot", forbidden)
+    monkeypatch.setattr(graph, "publish", forbidden)
+
+    result = asyncio.run(run_plan(_plan(), _registry(), _context(tmp_path), concurrency=3))
+
+    assert result.succeeded
+    assert (tmp_path / "brief.md").exists()
+
+
 def test_simulated_source_calls_are_concurrently_dispatched_and_saved_context_reused(tmp_path):
     first = asyncio.run(run_plan(_plan(), _registry(), _context(tmp_path), concurrency=3))
 

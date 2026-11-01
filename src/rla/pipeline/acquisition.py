@@ -33,6 +33,12 @@ from rla.sources.openalex import OpenAlexSource
 from rla.sources.semantic_scholar import SemanticScholarSource
 from rla.sources.serpapi import SerpApiSource
 from rla.store.cache import Cache, Fetcher, RateLimiter
+from rla.store.rate_limits import (
+    ProviderRequestLimiter,
+    RequestAttemptBudget,
+    provider_lock_directory,
+    provider_policy,
+)
 
 #: Per-source request budget per query. Semantic Scholar is the tightest.
 PER_QUERY_LIMIT: dict[str, int] = {
@@ -81,6 +87,7 @@ def candidate_window(papers: list[Paper], cap: int) -> list[Paper]:
     )
     return ranked[: max(cap, 1) * CANDIDATE_MULTIPLE]
 
+
 SOURCE_CLASSES: tuple[type[HttpSource], ...] = (
     SemanticScholarSource,
     OpenAlexSource,
@@ -125,21 +132,35 @@ def _short(error: Exception, limit: int = 120) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "..."
 
 
-def build_sources(settings: Settings, cache: Cache) -> dict[str, HttpSource]:
-    """One Fetcher per source so rate limits are per-source, not global."""
+def build_sources(
+    settings: Settings,
+    cache: Cache,
+    *,
+    attempt_budget: RequestAttemptBudget | None = None,
+) -> dict[str, HttpSource]:
+    """Build provider-isolated Fetchers with machine-local shared pacing locks."""
     http = httpx.AsyncClient(
         timeout=settings.request_timeout_seconds,
         headers={"User-Agent": "rla/0.1 (research literature agent)"},
         follow_redirects=True,
     )
 
-    def fetcher_for(min_interval: float) -> Fetcher:
+    lock_dir = provider_lock_directory(settings.data_dir)
+
+    def fetcher_for(provider: str) -> Fetcher:
+        policy = provider_policy(provider)
+        if provider == "semantic_scholar":
+            from dataclasses import replace
+
+            policy = replace(policy, min_interval=max(1.1, settings.s2_delay_seconds))
         return Fetcher(
             cache,
             http,
-            limiter=RateLimiter(min_interval),
+            limiter=RateLimiter(0.0),
             max_retries=settings.max_retries,
             timeout=settings.request_timeout_seconds,
+            provider_limiter=ProviderRequestLimiter(policy, lock_dir=lock_dir),
+            attempt_budget=attempt_budget,
         )
 
     enabled = settings.enabled_sources()
@@ -147,12 +168,9 @@ def build_sources(settings: Settings, cache: Cache) -> dict[str, HttpSource]:
     for cls in SOURCE_CLASSES:
         if cls.name not in enabled:
             continue
-        # The Semantic Scholar delay is configurable because its anonymous pool
-        # is shared; a keyless run needs roughly one request per second.
-        interval = settings.s2_delay_seconds if cls.name == "semantic_scholar" else cls.min_interval
-        sources[cls.name] = cls(fetcher_for(interval))
+        sources[cls.name] = cls(fetcher_for(cls.name))
     if "serpapi" in enabled:
-        sources["serpapi"] = SerpApiSource(fetcher_for(0.5), settings.serpapi_api_key)
+        sources["serpapi"] = SerpApiSource(fetcher_for("serpapi"), settings.serpapi_api_key)
     return sources
 
 
@@ -358,9 +376,7 @@ class Acquisition:
                     f"all {len(dedup.papers)} candidates; the rest rank below it on "
                     "completeness and citations and could not have reached the corpus"
                 )
-            async for evt in score_papers(
-                window, title, self.llm, self.settings.max_concurrency
-            ):
+            async for evt in score_papers(window, title, self.llm, self.settings.max_concurrency):
                 if evt.kind == "warn" and not evt.payload.get("scored", 0):
                     self.report.notes.append(
                         "the LLM rejected every scoring request, so relevance filtering did not "

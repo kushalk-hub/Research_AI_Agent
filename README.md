@@ -1,27 +1,45 @@
 # FODS Research Agent: From Question to Evidence-Backed Brief
 
-Ingests papers on a research topic, builds a citation-and-concept graph, and traverses
-that graph to answer lineage questions ("how did technique X evolve?") and gap questions
-("what's still unsolved in Y?") with traceable citations.
+**Primary project deliverable: the FODS research-to-brief application.** Start with
+`python -m fods.cli run`. The separate `rla` CLI remains available for the repository's earlier
+research-literature pipeline; it is not an alias for FODS and does not use the FODS task runtime.
 
-This README is an operational document: how to install, configure, verify, run, and
-diagnose `rla`. Design rationale lives in `docs/` and the ADRs (see Documentation map);
-this file links to those rather than duplicating them.
+Both applications share selected research primitives from `rla`: paper models and content hashes,
+configuration, source normalization and deduplication, provider clients, and caching. The FODS
+runtime owns its validated task plan, dependency scheduling, registered-tool execution, run trace,
+evidence selection, citation-ID validation, and brief write. The `rla` CLI runs its own pipeline,
+graph, TUI, and evaluation commands. The distribution name in `pyproject.toml` remains `rla`, with
+two separately registered console commands, `rla` and `fods`.
 
-The repository also includes a separate `fods` runtime demo. It reuses selected `rla`
-source and model interfaces while owning task validation, readiness, scheduling, traces,
-and citation-gated output. See the [architecture and demo plan](docs/implementation_architecture_and_demo_plan.md)
-and [demo commands](docs/demo_commands.md).
+This README is the operational guide for both command families; FODS is the recommended starting
+point. Design rationale lives in `docs/` and the ADRs. See the
+[architecture and demo plan](docs/implementation_architecture_and_demo_plan.md) and
+[demo commands](docs/demo_commands.md).
 
-> **Entry point:** the `rla` console script. `python -m src.rla.cli` does **not** work
-> (src-layout package; the import name is `rla`).
+```mermaid
+flowchart LR
+    Q[Research question] --> P[Plan and bounded tasks]
+    P --> R[Academic retrieval]
+    R --> N[Normalize and deduplicate]
+    N --> C[Saved research context]
+    C --> E[Select evidence and validate citations]
+    E --> B[Evidence-backed brief]
+    C -. optional, explicit .-> X[Local enrichment]
+    X -. explicit graph build .-> G[Saved knowledge graph]
+    G --> F[Read-only graph follow-up]
+```
 
-> The FODS demo can be run with `python -m fods.cli` or the installed `fods` command.
+The graph is an optional follow-up index over saved, enriched context. It is not a
+dependency of ordinary `fods run`; graph build/update are explicit commands.
+
+> **FODS entry point:** `python -m fods.cli` or the installed `fods` command. The companion
+> command is `rla`; `python -m src.rla.cli` does not work with this src-layout package.
 
 ## FODS backend CLI profiles
 
-Use `fods run --profile quick` for a fast answerable abstract context, or
-`fods run --profile deep` for bounded multi-query collection. The CLI records source timings,
+Use `fods run --profile quick --topic "<topic>" --question "<question>" --output "<new-path>"`
+for a fast answerable abstract context, or choose `--profile deep` for bounded multi-query
+collection. The CLI records source timings,
 candidate/context/evidence counts, snapshot identity, and citation-ID checks. Read
 [research architecture and CLI acceptance](docs/research_architecture_and_cli_acceptance.md) for
 limits, reuse/refresh commands, and evaluation criteria. Optional follow-on workflows are
@@ -29,6 +47,57 @@ limits, reuse/refresh commands, and evaluation criteria. Optional follow-on work
 one-hop academic reference resolution); both leave the original abstract context unchanged.
 Retrieval quality is marked `PENDING HUMAN REVIEW`; the benchmark pack and protocol are in
 [`docs/retrieval_benchmark_baseline.md`](docs/retrieval_benchmark_baseline.md).
+
+### Recommended first run
+
+After [installation](#installation-fresh-windows-machine), run the deterministic fixture workflow:
+
+```powershell
+.\.venv\Scripts\python.exe -m fods.cli run `
+  --topic "Graph Attention Networks" `
+  --question "How did graph attention use local neighborhoods?" `
+  --output "data/fods/briefs/mvp-final-demo.md" `
+  --mode simulate --planner fixture
+```
+
+Simulation uses bundled fixture papers and a deterministic planner; it makes no academic-source
+requests or model calls. Live mode retrieves from configured academic sources and requires network
+access; `--planner ollama` additionally needs a running Ollama model. A Gemini final answer requires
+the configured key and the explicit `RLA_FODS_ALLOW_GEMINI=1` opt-in. Every run writes a JSONL trace
+under `data/fods/runs/` and a saved context under `data/fods/topics/`. The command reports its run
+ID. Inspect a trace and generate its HTML replay with `python -m fods.cli replay <trace-path>`.
+
+## Optional graph-assisted follow-up
+
+First create or reuse a research context, then enrich it with the configured local Ollama
+model and explicitly build its graph. Follow-up queries read that saved snapshot, make no model
+or network calls, and never trigger a rebuild:
+
+```powershell
+python -m fods.cli run --topic "Graph Attention Networks" `
+  --question "How did graph attention use local neighborhoods?" `
+  --output "data/fods/briefs/gat-first.md" `
+  --mode simulate --planner fixture
+python -m fods.cli enrich --topic "Graph Attention Networks" `
+  --model "ollama/qwen3:4b" --max-papers 15
+python -m fods.cli graph build --topic "Graph Attention Networks"
+python -m fods.cli graph follow-up --topic "Graph Attention Networks" `
+  --question "Which papers use GAT?"
+```
+
+Other supported forms include concept discussion, topic findings, topic limitations, stored
+citation links by paper ID, and concepts shared by two paper IDs. Results include paper IDs,
+segment IDs, and source excerpts. Shared labels indicate vocabulary overlap only. Unsupported
+questions receive examples and can fall back to `fods graph query --topic ... --method ...`.
+Research contexts, enrichment artifacts, briefs/runs, graph snapshots, and graph measurements are
+stored below `data/fods/`; graph snapshots are under
+`data/fods/knowledge_graph/<topic-key>/graph.json`. See the [MVP completion report](docs/mvp_completion_report.md)
+for verification scope and limitations.
+
+The saved Graph Attention Networks snapshot in this checkout is an older schema: `graph stats`
+can inspect it, but the current query command requires a schema-v2 graph. `graph build` refuses to
+replace an existing snapshot unless `--force` is specified. Preserve the existing file before an
+intentional rebuild; follow-up never rebuilds it automatically.
 
 ## FODS browser visualizer
 
@@ -61,7 +130,7 @@ new filename.
 
 ```powershell
 git clone <repo-url>
-Set-Location Research_AI_Agent
+Set-Location Research_AI_Agent-fods
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 .\.venv\Scripts\python.exe -m pip install -e ".[dev,tui]"
@@ -74,9 +143,10 @@ that reports false hits.
 
 ## Repository setup
 
-Clone first (see Installation above), then note: `data/graph/` is gitignored, so a fresh clone has **no graph**. Run `rla run` or
-`rla build` before `rla eval` / `rla ask` (both fail with `FileNotFoundError` /
-"no graph" otherwise).
+For the companion `rla` pipeline, `data/graph/` is gitignored, so a fresh clone has **no rla
+graph**. Run `rla run` or `rla build` before `rla eval` / `rla ask` (both fail with
+`FileNotFoundError` / "no graph" otherwise). This is separate from the FODS graph under
+`data/fods/knowledge_graph/`.
 
 Committed data can also drift: a fresh clone's first graph build is blocked until
 `rla status --prune` (observed 0 matched / 26 stale / 30 missing) — see
@@ -181,7 +251,10 @@ report are keyless).
 
 ## CLI reference
 
-Verified against `src/rla/cli.py`. Prompts interactively for `-t` when omitted (`build`, `run`, `tui`); `ask` takes the question as a positional argument and prompts when omitted.
+The following table documents the **companion `rla` CLI**, not the primary FODS run above.
+It is registered separately from `fods` and executes the `rla` pipeline. `rla` prompts
+interactively for `-t` when omitted (`build`, `run`, `tui`); `ask` takes the question as a
+positional argument and prompts when omitted.
 
 | Command | What it does | Needs a key? |
 |---|---|---|

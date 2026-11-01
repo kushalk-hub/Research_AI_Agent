@@ -11,10 +11,9 @@ from fods.runtime import run_plan
 from fods.tools import (
     DiscoverReferencesArgs,
     EnrichedConcept,
-    EnrichmentBatchOutput,
+    EnrichmentPayload,
     EvidenceFact,
     ExtractionBatchArgs,
-    PaperEnrichment,
     SaveReferenceContextArgs,
     ToolContext,
     create_registry,
@@ -40,27 +39,16 @@ def _case(tmp_path, *, valid_excerpt: bool):
         year=2022,
         abstract="We introduce graph attention for neighborhood aggregation.",
     )
-    excerpt = (
-        "We introduce graph attention"
-        if valid_excerpt
-        else "The authors report a different unsupported claim"
-    )
-    result = EnrichmentBatchOutput(
-        items=[
-            PaperEnrichment(
-                paper_id=paper.id,
-                paper_hash=paper.ensure_hash(),
-                concepts=[
-                    EnrichedConcept(
-                        text="graph attention", role="introduces", evidence_excerpt=excerpt
-                    )
-                ],
-                methods=[EvidenceFact(text="neighborhood aggregation", evidence_excerpt=excerpt)],
-                findings=[],
-                limitations=[],
-                relations=[],
+    result = EnrichmentPayload(
+        concepts=[
+            EnrichedConcept(
+                text="graph attention", role="introduces", evidence_segment_ids=["S001"]
             )
-        ]
+        ],
+        methods=[EvidenceFact(text="neighborhood aggregation", evidence_segment_ids=["S001"])],
+        findings=[],
+        limitations=[],
+        relations=[],
     )
     context = {
         "snapshot_reused": True,
@@ -101,10 +89,23 @@ async def test_validated_enrichment_cache_is_reused_for_identical_inputs(tmp_pat
 
 
 async def test_unsupported_evidence_is_rejected_before_cache_write(tmp_path):
-    ctx, _model = _case(tmp_path, valid_excerpt=False)
+    ctx, model = _case(tmp_path, valid_excerpt=True)
+    # make evidence reference an unknown segment
+    bad = EnrichmentPayload(
+        concepts=[
+            EnrichedConcept(
+                text="graph attention", role="introduces", evidence_segment_ids=["S999"]
+            )
+        ],
+        methods=[],
+        findings=[],
+        limitations=[],
+        relations=[],
+    )
+    model.response = bad
     tool = create_registry({}).get("extract_enrichment_batch")
 
-    with pytest.raises(ValueError, match="exact evidence excerpt"):
+    with pytest.raises(ValueError, match="unknown evidence segment ID"):
         await tool.handler(ctx, ExtractionBatchArgs(paper_ids=["paper-1"]))
 
     cache_dir = ctx.data_dir / "fods" / "enrichment_cache"
@@ -114,8 +115,6 @@ async def test_unsupported_evidence_is_rejected_before_cache_write(tmp_path):
 @pytest.mark.parametrize(
     ("failure", "expected_message"),
     [
-        ("wrong_id", "unknown paper IDs"),
-        ("wrong_hash", "paper hash mismatch"),
         ("dangling_relation", "relation endpoint"),
         ("malformed_schema", "extra_forbidden"),
     ],
@@ -124,26 +123,28 @@ async def test_invalid_structured_outputs_are_rejected_without_cache(
     tmp_path, failure, expected_message
 ):
     ctx, model = _case(tmp_path, valid_excerpt=True)
-    original = model.response.items[0]
-    if failure == "wrong_id":
-        item = original.model_copy(update={"paper_id": "outside-batch"})
-        model.response = EnrichmentBatchOutput(items=[item])
-    elif failure == "wrong_hash":
-        item = original.model_copy(update={"paper_hash": "0" * 64})
-        model.response = EnrichmentBatchOutput(items=[item])
-    elif failure == "dangling_relation":
+    original = model.response
+    if failure == "dangling_relation":
         relation = {
             "source_term": "graph attention",
             "target_term": "unknown concept",
             "relation_type": "extends",
-            "evidence_excerpt": "We introduce graph attention",
+            "evidence_segment_ids": ["S001"],
         }
         data = original.model_dump(mode="json")
         data["relations"] = [relation]
-        item = PaperEnrichment.model_validate(data)
-        model.response = EnrichmentBatchOutput(items=[item])
+        model.response = EnrichmentPayload.model_validate(data)
     else:
-        model.response = {"items": [{"paper_id": "paper-1", "unknown": "field"}]}
+        model.response = {
+            "concepts": [
+                {
+                    "text": "x",
+                    "role": "introduces",
+                    "evidence_segment_ids": ["S001"],
+                    "unknown": "field",
+                }
+            ]
+        }
     tool = create_registry({}).get("extract_enrichment_batch")
 
     with pytest.raises(Exception, match=expected_message):
@@ -160,7 +161,7 @@ async def test_poisoned_cache_entry_is_recomputed_then_compatible_result_resumes
     first = await tool.handler(ctx, args)
     cache_path = next((ctx.data_dir / "fods" / "enrichment_cache").glob("*.json"))
     cached = json.loads(cache_path.read_text(encoding="utf-8"))
-    cached["output"]["items"][0]["paper_hash"] = "0" * 64
+    cached["output"]["paper_hash"] = "0" * 64
     cache_path.write_text(json.dumps(cached), encoding="utf-8")
 
     regenerated = await tool.handler(ctx, args)
@@ -199,23 +200,24 @@ async def test_partial_batch_failure_keeps_successful_cache_for_resume(tmp_path)
             self.calls: list[str] = []
 
         async def generate_structured(self, prompt, _schema, **_kwargs):
-            request = json.loads(prompt.split("Papers:\n", 1)[1])[0]
-            paper_id = request["paper_id"]
-            self.calls.append(paper_id)
-            if self.fail_paper_2 and paper_id == "paper-2":
-                return {"items": [{"paper_id": "malformed"}]}
-            return EnrichmentBatchOutput(
-                items=[
-                    PaperEnrichment(
-                        paper_id=paper_id,
-                        paper_hash=request["paper_hash"],
-                        concepts=[],
-                        methods=[],
-                        findings=[],
-                        limitations=[],
-                        relations=[],
-                    )
-                ]
+            self.calls.append("call")
+            call_index = len(self.calls)
+            if self.fail_paper_2 and call_index == 2:
+                return {
+                    "concepts": [
+                        {
+                            "text": "x",
+                            "role": "introduces",
+                            "evidence_segment_ids": ["S999"],
+                        }
+                    ]
+                }
+            return EnrichmentPayload(
+                concepts=[],
+                methods=[],
+                findings=[],
+                limitations=[],
+                relations=[],
             )
 
     plan = TaskPlan(
@@ -271,7 +273,7 @@ async def test_partial_batch_failure_keeps_successful_cache_for_resume(tmp_path)
     assert first.states["batch_1"].state is TaskState.COMPLETED
     assert first.states["batch_2"].state is TaskState.FAILED
     assert first.states["save_enrichment"].state is TaskState.BLOCKED
-    assert first_model.calls == ["paper-1", "paper-2"]
+    assert len(first_model.calls) == 2
 
     second_model = BatchModel(fail_paper_2=False)
     second = await run_plan(
@@ -283,7 +285,7 @@ async def test_partial_batch_failure_keeps_successful_cache_for_resume(tmp_path)
     )
 
     assert second.succeeded
-    assert second_model.calls == ["paper-2"]
+    assert len(second_model.calls) == 1
     assert second.states["save_enrichment"].result["papers_enriched"] == 2
 
 

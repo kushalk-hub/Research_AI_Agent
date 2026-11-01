@@ -13,6 +13,40 @@ exact checks completed for the current checkout are recorded in
 
 ## FODS research-to-brief demo
 
+FODS is the primary application demonstrated by this repository. Its run command uses the FODS
+runtime to validate and schedule the research tasks. The companion `rla` command runs a separate
+literature-pipeline CLI; both share lower-level paper, configuration, source, and model interfaces.
+The package distribution is named `rla`, but the two console scripts are separate (`fods` and
+`rla`).
+
+### Recommended deterministic starting point
+
+After installing the project and activating `.venv`, run:
+
+```powershell
+python -m fods.cli run --topic "Graph Attention Networks" `
+  --question "How did graph attention use local neighborhoods?" `
+  --output "data/fods/briefs/mvp-final-demo.md" `
+  --mode simulate --planner fixture
+```
+
+Simulation uses bundled fixture papers, a deterministic planner, and no model or academic-source
+requests. It is useful for repeatable rehearsal; its retrieved papers are fixtures, not live search
+results. Live mode calls configured academic sources and needs network access and available
+providers. `--planner ollama` needs a running local Ollama model. A Gemini final answer additionally
+requires `GEMINI_API_KEY` and `RLA_FODS_ALLOW_GEMINI=1`; without that opt-in, FODS does not send the
+answer to Gemini.
+
+The brief is written only to the explicit, workspace-relative output path. Each run also writes a
+run ID and JSONL event trace under `data/fods/runs/`, and the reusable context under
+`data/fods/topics/`. The terminal event stream includes task starts/completions, evidence
+selection, citation validation, and the run summary. To inspect/replay a trace and generate its
+HTML visualization, use `python -m fods.cli replay "data/fods/runs/<run-id>.jsonl"`.
+
+The primary fixture run was not executed in this restricted Windows environment: asyncio setup
+fails before the runtime starts due to the already-diagnosed loopback socket restriction. See the
+[completion report](mvp_completion_report.md); no success output is fabricated here.
+
 ### Interactive browser visualizer
 
 Start the local UI from the repository root, then open `http://127.0.0.1:8765/`:
@@ -140,6 +174,55 @@ run to one provider. Each resolver call and the overall run are bounded by `--ti
 (10–300 seconds). Live discovery uses a new per-run cache. The Phase 2.1 bounded OpenAlex check
 resolved five reference records in about 1.3 seconds; the local Ollama endpoint was unavailable,
 so live enrichment was not verified.
+
+### Optional saved-graph follow-up
+
+Graph operations are opt-in and separate from the regular brief workflow. The original saved
+context in this checkout uses the exact topic string `Graph attention networks` (topic keys are
+case-sensitive). Its existing graph can be inspected without modifying it:
+
+```powershell
+python -m fods.cli graph stats --topic "Graph attention networks"
+```
+
+For a topic that has an enriched context but no graph snapshot, build once and then inspect it:
+
+```powershell
+python -m fods.cli graph build --topic "<topic-with-no-existing-graph>"
+python -m fods.cli graph stats --topic "<topic-with-no-existing-graph>"
+```
+
+Then ask supported questions against the published snapshot:
+
+```powershell
+python -m fods.cli graph follow-up --topic "Graph attention networks" `
+  --question "Which papers use GAT?"
+python -m fods.cli graph follow-up --topic "Graph attention networks" `
+  --question "What findings are reported for graph attention networks?"
+python -m fods.cli graph follow-up --topic "Graph attention networks" `
+  --question "What limitations are mentioned for graph attention networks?"
+python -m fods.cli graph follow-up --topic "Graph attention networks" `
+  --question "Which papers cite <paper-id>?" --json
+```
+
+Answers are read-only and bounded. They include paper IDs, source segment IDs, and excerpts;
+citation queries identify stored bibliographic references. `--json` emits structured records.
+The command does not build missing snapshots: run `graph build` explicitly. Exact structured
+queries remain available through `fods graph query`. The focused offline regression test exercises
+the production CLI against a persisted fixture snapshot and checks evidence-bearing output.
+
+The published Graph Attention Networks snapshot in this checkout uses schema v1. Statistics work,
+but current follow-ups require schema v2; the existing snapshot was preserved. Rebuilding an
+existing snapshot requires `--force` and replaces it, so preserve a copy first. The real-artifact
+graph check for this sprint copied the saved context and 15 matching enrichment files into
+`.pytest-tmp/`, then ran the actual `graph build`, `stats`, and follow-up CLI callbacks on that
+isolated data. It selected 29 eligible papers (605 nodes, 607 edges, 11 citation edges). The
+follow-up output included two exact GAT method records, five topic findings, one limitation, and
+seven stored citations for `W2766453196`. A missing snapshot and an unsupported question both
+returned explicit messages without building anything. The retained output and schema-v2 snapshot
+are under the dated `.pytest-tmp/mvp-existing-context-demo-*/` directory; no original data was
+replaced. To replace the old published snapshot in a normal workflow requires an explicit
+`--force`; back it up first.
 
 ---
 

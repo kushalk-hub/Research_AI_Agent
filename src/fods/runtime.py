@@ -189,6 +189,12 @@ async def run_plan(
         if workflow_budget_seconds is not None
         else None
     )
+    request_deadlines = [
+        deadline for deadline in (acquisition_deadline, workflow_deadline) if deadline is not None
+    ]
+    base_context.metadata["outbound_request_deadline"] = (
+        min(request_deadlines) if request_deadlines else None
+    )
     acquisition_stop_reason = ""
     workflow_stop_reason = ""
     log.emit(
@@ -833,6 +839,21 @@ async def run_plan(
         if succeeded
         else "task_failed_or_blocked"
     )
+    if not succeeded and any(item.kind == "source_rate_limit_stopped" for item in log.events):
+        reason = "rate_limit_budget_stopped"
+    elif not succeeded and any(item.kind == "source_http_budget_stopped" for item in log.events):
+        reason = "http_attempt_budget_exhausted"
+    http_attempt_events = [item for item in log.events if item.kind == "source_http_attempt"]
+    attempts_by_provider: dict[str, int] = {}
+    max_in_flight_by_provider: dict[str, int] = {}
+    for item in http_attempt_events:
+        provider = str(item.payload.get("provider", "unknown"))
+        attempts_by_provider[provider] = attempts_by_provider.get(provider, 0) + 1
+        max_in_flight_by_provider[provider] = max(
+            max_in_flight_by_provider.get(provider, 0),
+            int(item.payload.get("in_flight", 0)),
+        )
+    attempt_budget = context.metadata.get("http_attempt_budget")
     log.emit(
         "run_finished",
         "run completed with partial sources"
@@ -851,6 +872,11 @@ async def run_plan(
         unique_paper_target=int(profile.get("target_unique_papers", 0)),
         research_stop_reason=acquisition_stop_reason or reason,
         unavailable_sources=source_unavailable,
+        http_attempts=len(http_attempt_events),
+        http_attempts_by_provider=attempts_by_provider,
+        provider_max_in_flight_observed=max_in_flight_by_provider,
+        http_attempt_budget=(attempt_budget.maximum if attempt_budget is not None else None),
+        http_attempt_budget_used=(attempt_budget.used if attempt_budget is not None else None),
         elapsed_ms=round(
             (time.perf_counter() - run_started) * 1000
             + float(base_context.metadata.get("pre_execution_ms", 0)),

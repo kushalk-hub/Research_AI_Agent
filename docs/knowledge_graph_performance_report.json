@@ -1,0 +1,243 @@
+{
+  "date": "2026-10-31",
+  "topic": "Graph attention networks",
+  "context_id": "6027ff84b166b45f6ac9955ba3f58b83",
+  "eligibility_audit": {
+    "source": "production classify_inputs shared raw discovery/classification/selection",
+    "context_records": 45,
+    "raw_topic_artifact_files": 15,
+    "selected_papers": 29,
+    "status_counts": {
+      "DUPLICATE_OR_AMBIGUOUS": 3,
+      "ELIGIBLE": 29,
+      "MISSING_ENRICHMENT": 13
+    },
+    "valid_extracted_items": 298,
+    "invalid_extracted_items": 0,
+    "paper_level_manifest": ".pytest-tmp/graph-eligibility-45-stabilization.json",
+    "note": "Earlier 32 indexed / 13 missing counts came from a filtered loader and are retained under eligibility_audit_historical_filtered_loader."
+  },
+  "measurement_reconciliation": {
+    "benchmark_run": "2026-10-31-local-inmemory-v1",
+    "benchmark_snapshot_bytes_serialized_with_default_json_spacing": 500455,
+    "benchmark_peak_traced_memory_bytes": 906616,
+    "benchmark_total_ms": 66.798,
+    "cli_build_run": "2026-10-31-real-context-cli-build-v1",
+    "cli_snapshot_bytes_compact_published_json": 480167,
+    "cli_peak_traced_memory_bytes": 910448,
+    "cli_total_build_and_publish_ms": 86.857,
+    "note": "These are separate runs and serialization modes; neither measurement supersedes the other."
+  },
+  "persisted_cli_update_scenarios": {
+    "status": "completed",
+    "measurement_origin": "production Typer CLI exercised by isolated persisted regression test; synthetic seven-paper corpus, milliseconds",
+    "artifact_directory": ".pytest-tmp/cli-persisted-final/",
+    "initial_build": {
+      "update_ms": 1.187,
+      "publish_ms": 3.326,
+      "total_ms": 4.513
+    },
+    "updates": [
+      {
+        "scenario": "no_change",
+        "update_ms": 0.124,
+        "publish_ms": 3.396,
+        "total_ms": 3.52,
+        "processed": 0
+      },
+      {
+        "scenario": "one_new_paper",
+        "update_ms": 0.281,
+        "publish_ms": 3.533,
+        "total_ms": 3.814,
+        "new": 1
+      },
+      {
+        "scenario": "five_new_papers",
+        "update_ms": 0.595,
+        "publish_ms": 4.559,
+        "total_ms": 5.154,
+        "new": 5
+      },
+      {
+        "scenario": "changed_enrichment",
+        "update_ms": 0.591,
+        "publish_ms": 3.705,
+        "total_ms": 4.296,
+        "changed": 1
+      },
+      {
+        "scenario": "repeat_idempotent",
+        "update_ms": 0.43,
+        "publish_ms": 4.195,
+        "total_ms": 4.625,
+        "processed": 0
+      },
+      {
+        "scenario": "one_invalid_evidence_item",
+        "update_ms": 0.485,
+        "publish_ms": 3.887,
+        "total_ms": 4.372,
+        "changed": 1,
+        "rejected_evidence_count": 1
+      }
+    ],
+    "hash_mismatch": "CLI update rejected stale context hash; prior snapshot bytes unchanged",
+    "publication_failure": "simulated publish error; prior snapshot remained readable and valid",
+    "limitation": "fixture timings do not represent the 45-paper research context and are separate from in-memory and real-context initial-build measurements"
+  },
+  "input_records_inspected": 45,
+  "eligible_papers": 32,
+  "initial_build": {
+    "inspected": 45,
+    "processed": 32,
+    "new": 32,
+    "changed": 0,
+    "deleted": 0,
+    "elapsed_ms": 66.763,
+    "indexing_ms": 60.258,
+    "normalization_ms": 2.702,
+    "validation_ms": 2.725,
+    "wall_ms": 66.785,
+    "total_wall_ms": 66.798,
+    "peak_memory_bytes": 906616
+  },
+  "updates": {
+    "no_change": {
+      "inspected": 45,
+      "processed": 0,
+      "new": 0,
+      "changed": 0,
+      "deleted": 0,
+      "elapsed_ms": 6.58,
+      "indexing_ms": 1.306,
+      "normalization_ms": 0.0,
+      "validation_ms": 0.371,
+      "wall_ms": 6.59
+    },
+    "one_new": {
+      "inspected": 46,
+      "processed": 1,
+      "new": 1,
+      "changed": 0,
+      "deleted": 0,
+      "elapsed_ms": 6.014,
+      "indexing_ms": 1.794,
+      "normalization_ms": 0.047,
+      "validation_ms": 0.359,
+      "wall_ms": 6.023
+    },
+    "five_new": {
+      "inspected": 50,
+      "processed": 5,
+      "new": 5,
+      "changed": 0,
+      "deleted": 0,
+      "elapsed_ms": 8.714,
+      "indexing_ms": 4.503,
+      "normalization_ms": 0.13,
+      "validation_ms": 0.44,
+      "wall_ms": 8.727
+    },
+    "one_changed_enrichment": {
+      "inspected": 45,
+      "processed": 1,
+      "new": 0,
+      "changed": 1,
+      "deleted": 0,
+      "elapsed_ms": 5.931,
+      "indexing_ms": 1.793,
+      "normalization_ms": 0.046,
+      "validation_ms": 0.374,
+      "wall_ms": 5.94
+    }
+  },
+  "queries": {
+    "direct_concept_lookup": {
+      "kind": "CONCEPT",
+      "value": "L1 regularization",
+      "repetitions": 100,
+      "p50_ms": 0.008,
+      "p95_ms": 0.009
+    },
+    "papers_sharing_concepts": {
+      "kind": "SHARED",
+      "value": "doi:10.3390/electronics13214208|W3146788459",
+      "repetitions": 100,
+      "p50_ms": 0.089,
+      "p95_ms": 0.093
+    },
+    "methods_used_by_paper": {
+      "kind": "PAPER",
+      "value": "doi:10.2139/ssrn.7014938",
+      "repetitions": 100,
+      "p50_ms": 0.017,
+      "p95_ms": 0.018
+    },
+    "bounded_traversal": {
+      "kind": "CONCEPT",
+      "value": "L1 regularization",
+      "repetitions": 100,
+      "p50_ms": 0.017,
+      "p95_ms": 0.018
+    },
+    "evidence_for_finding": {
+      "kind": "FINDING",
+      "value": "PR-AUC of 0.9930",
+      "repetitions": 100,
+      "p50_ms": 0.008,
+      "p95_ms": 0.008
+    }
+  },
+  "graph": {
+    "nodes": 669,
+    "edges": 674,
+    "snapshot_bytes": 500455
+  },
+  "normal_research_path": {
+    "graph_builder_imported_by_runtime": false,
+    "graph_update_invoked_by_runtime": false,
+    "evidence": "fods.knowledge_graph is imported only inside explicit graph CLI handlers; src/fods/runtime.py contains no graph import or call."
+  },
+  "eligibility_audit_historical_filtered_loader": {
+    "records_inspected": 45,
+    "indexed": 32,
+    "excluded_missing_enrichment": 13,
+    "excluded_hash_mismatch": 0,
+    "excluded_invalid_enrichment": 0,
+    "duplicates": 0,
+    "paper_level_manifest": ".pytest-tmp/graph-eligibility-45.json"
+  },
+  "evidence_ownership_limitation": {
+    "parent_identity_fields": [
+      "PaperEnrichment.paper_id",
+      "PaperEnrichment.paper_hash"
+    ],
+    "nested_evidence_fields": [
+      "evidence_segment_ids",
+      "evidence_excerpt"
+    ],
+    "segment_fields": [
+      "segment_id",
+      "start_char",
+      "end_char",
+      "text"
+    ],
+    "guarantee": "CLI classification validates parent paper ID/hash and reconstructs each paper-local segment ID and excerpt against that context paper abstract.",
+    "limitation": "A segment copied from another paper is indistinguishable if local ID and excerpt match the target paper.",
+    "test": "tests/test_fods_knowledge_graph.py::test_paper_local_segment_ids_cannot_prove_independent_foreign_ownership",
+    "migration": "No schema migration in this pass; independent proof requires paper-bound segment IDs or nested paper/hash provenance."
+  },
+  "final_verification": {
+    "date": "2026-11-01",
+    "asyncio_root_cause": "Windows loopback connect is denied with Winsock WSAEACCES 10013; socketpair and asyncio self-pipe creation then stall. Reproduced on Python 3.11.7, 3.12.8, and 3.13.7.",
+    "diagnostics": ".pytest-tmp/asyncio-final-diagnostics/diagnostic-summary.md",
+    "p4": "28 collected; 22 passed before async setup stall; incomplete",
+    "full_suite": "770 collected; 5 passed before async setup stall; incomplete",
+    "cli_concurrent_process_test": "passed; positive locking run retained both paper updates; deterministic no-lock control lost the later stale update",
+    "runtime_isolation_spy": "not completed because asyncio.run stalls before the test body",
+    "security_settings_changed": false,
+    "original_context_or_published_graph_modified": false,
+    "git_commit_created": false
+  }
+}

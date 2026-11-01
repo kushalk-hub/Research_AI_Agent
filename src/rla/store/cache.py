@@ -18,6 +18,14 @@ from typing import Any
 import httpx
 
 from rla.errors import SourceFormatError
+from rla.store.rate_limits import (
+    ProviderRequestLimiter,
+    RateLimitDeadlineExceeded,
+    RequestAttemptBudget,
+    RequestAttemptBudgetExceeded,
+    current_request_context,
+    parse_retry_after,
+)
 
 #: USD per 1M tokens for the rough cost report printed at run end.
 #:
@@ -102,9 +110,7 @@ class CostTracker:
     unknown_calls: int = 0
     by_stage: dict[str, dict[str, int]] = field(default_factory=dict)
 
-    def record(
-        self, stage: str, input_tokens: int | None, output_tokens: int | None
-    ) -> None:
+    def record(self, stage: str, input_tokens: int | None, output_tokens: int | None) -> None:
         """Add one call's usage. `None` on either side marks the total unknown."""
         self.calls += 1
         if input_tokens is None or output_tokens is None:
@@ -289,23 +295,21 @@ class Fetcher:
         limiter: RateLimiter | None = None,
         max_retries: int = 4,
         timeout: float = 30.0,
+        provider_limiter: ProviderRequestLimiter | None = None,
+        attempt_budget: RequestAttemptBudget | None = None,
     ) -> None:
         self.cache = cache
         self.client = client
         self.limiter = limiter or RateLimiter(0.0)
         self.max_retries = max_retries
         self.timeout = timeout
+        self.provider_limiter = provider_limiter
+        self.attempt_budget = attempt_budget
 
     @staticmethod
     def _retry_after(response: httpx.Response) -> float | None:
         """Seconds the server asked us to wait, per the standard header."""
-        raw = response.headers.get("retry-after")
-        if not raw:
-            return None
-        try:
-            return max(0.0, float(raw))
-        except ValueError:
-            return None  # an HTTP-date, which we do not bother to parse
+        return parse_retry_after(response.headers.get("retry-after"))
 
     async def get_json(
         self,
@@ -342,44 +346,244 @@ class Fetcher:
             return cached
 
         last_error: Exception | None = None
-        for attempt in range(self.max_retries):
-            await self.limiter.acquire()
+        context = current_request_context()
+        endpoint_class = self._endpoint_class(url, params)
+        provider = (
+            self.provider_limiter.policy.provider
+            if self.provider_limiter is not None
+            else prefix.split(":", 1)[0]
+        )
+        for attempt in range(1, self.max_retries + 1):
+            permit_context = None
+            permit = None
+            permit_entered = False
             try:
+                if self.provider_limiter is not None:
+                    permit_context = self.provider_limiter.request(
+                        endpoint_class,
+                        attempt,
+                        deadline=context.deadline if context else None,
+                    )
+                    permit = await permit_context.__aenter__()
+                    permit_entered = True
+                else:
+                    await self.limiter.acquire()
+
+                if self.attempt_budget is not None:
+                    try:
+                        attempt_number = self.attempt_budget.claim(
+                            provider, endpoint_class, attempt
+                        )
+                    except RequestAttemptBudgetExceeded:
+                        self._emit(
+                            "source_http_budget_stopped",
+                            context,
+                            provider=provider,
+                            endpoint_class=endpoint_class,
+                            attempt=attempt,
+                            attempts_used=self.attempt_budget.used,
+                            attempt_budget=self.attempt_budget.maximum,
+                            reason="hard_attempt_budget_exhausted",
+                        )
+                        raise
+                else:
+                    attempt_number = attempt
+
+                if permit is not None:
+                    self._emit(
+                        "source_http_attempt",
+                        context,
+                        provider=provider,
+                        endpoint_class=endpoint_class,
+                        attempt=attempt,
+                        attempt_number=attempt_number,
+                        scheduled_delay=round(permit.scheduled_delay, 3),
+                        actual_wait=round(permit.actual_wait, 3),
+                        in_flight=self.provider_limiter._in_flight,
+                        request_started_monotonic=round(permit.started_at, 6),
+                    )
+
                 response = await self.client.get(
                     url, params=dict(params or {}), timeout=self.timeout
                 )
+                safe_headers = (
+                    self.provider_limiter.observe_headers(response.headers)
+                    if self.provider_limiter is not None
+                    else (
+                        {"retry-after": response.headers["retry-after"]}
+                        if "retry-after" in response.headers
+                        else {}
+                    )
+                )
+                retry_after = self._retry_after(response)
                 if response.status_code == 429 or response.status_code >= 500:
-                    if response.status_code == 429:
-                        wait = self._retry_after(response)
-                        if wait is not None and wait > self.MAX_HONOURED_RETRY_AFTER:
-                            # Exponential backoff would burn all four attempts in
-                            # seconds and still fail, so stop and say why.
-                            raise RuntimeError(
-                                f"rate limited by {url}; the server asks for "
-                                f"{int(wait)}s ({wait / 3600:.1f}h) before retrying"
-                            ) from None
-                    raise httpx.HTTPStatusError(
+                    last_error = httpx.HTTPStatusError(
                         f"retryable status {response.status_code}",
                         request=response.request,
                         response=response,
                     )
+                    delay = self._retry_delay(attempt, retry_after)
+                    decision = (
+                        "stop_retry_after_exceeds_bound"
+                        if retry_after is not None and retry_after > self.MAX_HONOURED_RETRY_AFTER
+                        else "retry"
+                        if attempt < self.max_retries
+                        else "attempts_exhausted"
+                    )
+                    if permit is not None and delay:
+                        permit.defer_for(delay)
+                    self._emit(
+                        "source_http_response",
+                        context,
+                        provider=provider,
+                        endpoint_class=endpoint_class,
+                        attempt=attempt,
+                        status=response.status_code,
+                        retry_after=retry_after,
+                        rate_limit_headers=safe_headers,
+                        retry_delay=round(delay, 3),
+                        retry_decision=decision,
+                    )
+                    if decision == "retry":
+                        self._emit(
+                            "source_http_retry",
+                            context,
+                            provider=provider,
+                            endpoint_class=endpoint_class,
+                            attempt=attempt,
+                            status=response.status_code,
+                            retry_after=retry_after,
+                            scheduled_delay=round(delay, 3),
+                        )
+                    if decision == "stop_retry_after_exceeds_bound":
+                        raise RuntimeError(
+                            f"rate limited by {provider} {endpoint_class} "
+                            f"({self._safe_endpoint(url)}); Retry-After {retry_after:g}s "
+                            f"exceeds the {self.MAX_HONOURED_RETRY_AFTER:g}s retry bound"
+                        ) from None
+                    if attempt == self.max_retries:
+                        break
+                    if self.provider_limiter is None:
+                        await asyncio.sleep(delay)
+                    continue
+
                 response.raise_for_status()
                 self.cache.set(key, response.text)
+                self._emit(
+                    "source_http_response",
+                    context,
+                    provider=provider,
+                    endpoint_class=endpoint_class,
+                    attempt=attempt,
+                    status=response.status_code,
+                    retry_after=retry_after,
+                    rate_limit_headers=safe_headers,
+                    retry_decision="success",
+                )
                 return response.text
             except (httpx.HTTPError, UnicodeDecodeError) as exc:
                 last_error = exc
-                # Honour a short Retry-After when the server sends one: it is
-                # more accurate than our own guess at the backoff curve.
-                wait = (
+                retry_after = (
                     self._retry_after(exc.response)
                     if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None
                     else None
                 )
-                delay = min(2**attempt, 30)
-                if wait is not None:
-                    delay = max(delay, wait)
-                await asyncio.sleep(delay)
+                delay = self._retry_delay(attempt, retry_after)
+                if permit is not None and delay:
+                    permit.defer_for(delay)
+                self._emit(
+                    "source_http_response",
+                    context,
+                    provider=provider,
+                    endpoint_class=endpoint_class,
+                    attempt=attempt,
+                    status=(
+                        exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+                    ),
+                    retry_after=retry_after,
+                    rate_limit_headers=(
+                        self.provider_limiter.observe_headers(exc.response.headers)
+                        if self.provider_limiter is not None
+                        and isinstance(exc, httpx.HTTPStatusError)
+                        and exc.response is not None
+                        else {}
+                    ),
+                    retry_delay=round(delay, 3),
+                    retry_decision="retry" if attempt < self.max_retries else "attempts_exhausted",
+                    outcome=type(exc).__name__,
+                )
+                if attempt < self.max_retries:
+                    self._emit(
+                        "source_http_retry",
+                        context,
+                        provider=provider,
+                        endpoint_class=endpoint_class,
+                        attempt=attempt,
+                        status=(
+                            exc.response.status_code
+                            if isinstance(exc, httpx.HTTPStatusError)
+                            else None
+                        ),
+                        retry_after=retry_after,
+                        scheduled_delay=round(delay, 3),
+                    )
+                if attempt < self.max_retries and self.provider_limiter is None:
+                    await asyncio.sleep(delay)
+            except RateLimitDeadlineExceeded:
+                self._emit(
+                    "source_rate_limit_stopped",
+                    context,
+                    provider=provider,
+                    endpoint_class=endpoint_class,
+                    attempt=attempt,
+                    reason=(
+                        "cooldown_exceeds_workflow_deadline"
+                        if context is not None and context.deadline is not None
+                        else "cooldown_exceeds_safe_wait_bound"
+                    ),
+                )
+                raise
+            finally:
+                if permit_context is not None and permit_entered:
+                    await permit_context.__aexit__(None, None, None)
 
+        endpoint = self._safe_endpoint(url)
         raise RuntimeError(
-            f"failed to fetch {url} after {self.max_retries} attempts"
+            f"failed to fetch {provider} {endpoint_class} ({endpoint}) after "
+            f"{self.max_retries} attempts"
         ) from last_error
+
+    def _retry_delay(self, attempt: int, retry_after: float | None) -> float:
+        delay = min(2 ** (attempt - 1), 30)
+        return max(delay, retry_after or 0.0)
+
+    @staticmethod
+    def _endpoint_class(url: str, params: Mapping[str, Any] | None) -> str:
+        from urllib.parse import urlsplit
+
+        path = urlsplit(url).path.casefold()
+        if "arxiv.org" in url or "dblp.org" in url:
+            return "search"
+        if "crossref.org" in url:
+            return "list_search"
+        if "openalex.org" in url:
+            return "works_filter" if params and "filter" in params else "works_search"
+        if "semanticscholar.org" in url:
+            if path.endswith("/references"):
+                return "references"
+            if path.endswith("/citations"):
+                return "citations"
+            return "paper_search"
+        return "request"
+
+    @staticmethod
+    def _safe_endpoint(url: str) -> str:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(url)
+        return f"{parsed.hostname or 'unknown'}{parsed.path}"
+
+    @staticmethod
+    def _emit(kind: str, context, **payload: Any) -> None:
+        if context is not None and context.emit is not None:
+            context.emit(kind, payload)

@@ -7,6 +7,7 @@ from typing import Any
 
 from rla.config import Settings
 from rla.store.cache import Cache
+from rla.store.rate_limits import RequestAttemptBudget
 
 
 @dataclass
@@ -19,7 +20,21 @@ class LiveSourcePool:
         await self.client.aclose()
 
 
-def build_live_source_pool(settings: Settings, cache: Cache, limit: int = 3) -> LiveSourcePool:
+SOURCE_ORDER = ("semantic_scholar", "openalex", "arxiv", "crossref", "dblp")
+
+
+def selected_live_source_names(settings: Settings, limit: int) -> list[str]:
+    enabled = set(settings.enabled_sources())
+    return [name for name in SOURCE_ORDER if name in enabled][:limit]
+
+
+def build_live_source_pool(
+    settings: Settings,
+    cache: Cache,
+    limit: int = 3,
+    *,
+    attempt_budget: RequestAttemptBudget | None = None,
+) -> LiveSourcePool:
     """Build source adapters, returning each source's single-request operation.
 
     The FODS scheduler invokes these operations separately. This intentionally
@@ -27,14 +42,12 @@ def build_live_source_pool(settings: Settings, cache: Cache, limit: int = 3) -> 
     """
     from rla.pipeline.acquisition import build_sources
 
-    sources = build_sources(settings, cache)
-    preferred = ("semantic_scholar", "openalex", "arxiv", "crossref", "dblp")
-    selected: dict[str, Any] = {}
-    for name in preferred:
-        if name in sources:
-            selected[name] = sources[name]
-        if len(selected) == limit:
-            break
+    sources = build_sources(settings, cache, attempt_budget=attempt_budget)
+    selected = {
+        name: sources[name]
+        for name in selected_live_source_names(settings, limit)
+        if name in sources
+    }
     if len(selected) < 2:
         raise RuntimeError("at least two live academic sources must be enabled")
     client = next(iter(sources.values())).fetcher.client

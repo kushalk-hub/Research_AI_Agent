@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import httpx
 import pytest
 import respx
@@ -1050,18 +1052,20 @@ async def test_a_short_retry_after_is_honoured_rather_than_guessed(cache, monkey
 
 
 @respx.mock
-async def test_a_non_numeric_retry_after_is_ignored(cache, monkeypatch):
+async def test_an_http_date_retry_after_is_parsed_and_stopped_by_the_wait_bound(cache, monkeypatch):
     async def fake_sleep(delay):
         return None
 
     monkeypatch.setattr("rla.store.cache.asyncio.sleep", fake_sleep)
-    respx.get(OA_URL).mock(
-        return_value=httpx.Response(429, headers={"retry-after": "Wed, 21 Oct 2099 07:28:00 GMT"})
+    retry_after = (datetime.now(UTC) + timedelta(seconds=120)).strftime("%a, %d %b %Y %H:%M:%S GMT")
+    route = respx.get(OA_URL).mock(
+        return_value=httpx.Response(429, headers={"retry-after": retry_after})
     )
     async with httpx.AsyncClient() as client:
         fetcher = Fetcher(cache, client, max_retries=1)
-        with pytest.raises(RuntimeError, match="failed to fetch"):
+        with pytest.raises(RuntimeError, match="Retry-After .* exceeds"):
             await fetcher.get_json(OA_URL, {"search": "retry-after-httPDATE"})
+    assert route.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1108,9 +1112,7 @@ def test_the_candidate_window_prefers_papers_extraction_can_use():
     assert [p.id for p in window] == ["complete", "stub"]
 
 
-async def test_scoring_is_never_asked_to_look_at_more_than_the_window(
-    settings, cache, monkeypatch
-):
+async def test_scoring_is_never_asked_to_look_at_more_than_the_window(settings, cache, monkeypatch):
     """The end-to-end shape of the waste: the pool handed to the scoring stage
     must be bounded by the cap even when the sources return hundreds of papers."""
     from rla.events import Phase, event
