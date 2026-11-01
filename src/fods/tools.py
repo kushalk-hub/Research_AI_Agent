@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from fods.events import EventLog
+from fods.paths import resolve_workspace_path
 from fods.research import deduplicate_candidates, profile_for, rank_candidates
 from fods.tracing import traced_model_call
 from rla.models import Paper, content_hash
@@ -231,9 +232,7 @@ class ToolRegistry:
 def output_path(workspace: Path, requested: str) -> Path:
     """Resolve a user-named output under the workspace, rejecting escapes."""
     root = workspace.resolve()
-    candidate = (root / requested).resolve()
-    if not candidate.is_relative_to(root):
-        raise ValueError("output path must resolve inside the approved workspace")
+    candidate = resolve_workspace_path(root, requested)
     if candidate == root:
         raise ValueError("output path must name a file")
     return candidate

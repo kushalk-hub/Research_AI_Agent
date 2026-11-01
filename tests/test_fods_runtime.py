@@ -486,13 +486,60 @@ def test_user_cancellation_is_recorded_and_never_saves_a_brief(tmp_path):
     assert all(record.state.value == "cancelled" for record in result.states.values())
 
 
-def test_output_path_cannot_escape_workspace(tmp_path):
+@pytest.mark.parametrize(
+    "requested",
+    [
+        "../outside.md",
+        "..\\outside.md",
+        "folder/../../outside.md",
+        "folder\\..\\..\\outside.md",
+        "folder/..\\..\\outside.md",
+        "/outside.md",
+        "C:\\outside.md",
+        "\\\\server\\share\\outside.md",
+    ],
+)
+def test_output_path_rejects_cross_platform_workspace_escapes(tmp_path, requested):
     with pytest.raises(ValueError, match="inside the approved workspace"):
-        output_path(tmp_path, "..\\outside.md")
+        output_path(tmp_path, requested)
 
-    plan = _plan("..\\outside.md")
     with pytest.raises(PlanError, match="inside the approved workspace"):
-        validate_plan(plan, _registry().schemas(), workspace=tmp_path)
+        validate_plan(_plan(requested), _registry().schemas(), workspace=tmp_path)
+
+
+@pytest.mark.parametrize(
+    "requested",
+    [
+        "brief.md",
+        "briefs/output.md",
+        "briefs\\output.md",
+        "reports/2026/final.md",
+        "report..md",
+    ],
+)
+def test_output_path_accepts_portable_nested_paths_and_double_dots(tmp_path, requested):
+    destination = output_path(tmp_path, requested)
+
+    assert destination.is_relative_to(tmp_path.resolve())
+    assert destination != tmp_path.resolve()
+
+
+def test_output_path_rejects_existing_symlink_escape(tmp_path):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    try:
+        (workspace / "linked").symlink_to(outside, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"directory symlinks are unavailable: {exc}")
+
+    requested = "linked/escape.md"
+    with pytest.raises(ValueError, match="inside the approved workspace"):
+        output_path(workspace, requested)
+
+    with pytest.raises(PlanError, match="inside the approved workspace"):
+        validate_plan(_plan(requested), _registry().schemas(), workspace=workspace)
 
 
 def test_priority_queue_uses_priority_then_fifo_order():

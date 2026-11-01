@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from fods.models import TaskPlan
+from fods.paths import resolve_workspace_path
 
 
 class PlanError(ValueError):
@@ -101,8 +102,13 @@ def validate_plan(
         _validate_reference_flow(plan)
     if workspace is not None:
         root = workspace.resolve()
-        destination = (root / plan.output_path).resolve()
-        if destination == root or not destination.is_relative_to(root):
+        try:
+            destination = resolve_workspace_path(root, plan.output_path)
+        except ValueError as exc:
+            raise PlanError(
+                "output path must resolve to a file inside the approved workspace"
+            ) from exc
+        if destination == root:
             raise PlanError("output path must resolve to a file inside the approved workspace")
         if destination.exists() and plan.workflow == "research":
             raise PlanError(f"output path already exists; choose a new path: {plan.output_path}")
