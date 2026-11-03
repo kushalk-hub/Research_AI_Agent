@@ -818,4 +818,4 @@ async function replayRun(runId) {
   } catch (error) { toast(error.message); }
 }
 
-initialize();
+if (new URLSearchParams(location.search).has("legacy")) initialize();

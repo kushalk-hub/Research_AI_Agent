@@ -430,8 +430,10 @@ async def test_a_capable_fallback_is_used_for_a_structured_stage(tmp_path):
 def test_a_model_named_as_its_own_fallback_is_dropped():
     """Re-issuing an identical failing request is not a retry."""
     settings = Settings(
+        _env_file=None,
         gemini_api_key="k",
         fast_model="gemini-2.5-flash-lite",
+        structured_model="",
         fallback_models="gemini-2.5-flash-lite, gemini-2.5-flash",
     )
     assert settings.fallback_chain == ["gemini-2.5-flash"]

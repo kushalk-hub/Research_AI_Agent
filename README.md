@@ -14,7 +14,13 @@ two separately registered console commands, `rla` and `fods`.
 This README is the operational guide for both command families; FODS is the recommended starting
 point. Design rationale lives in `docs/` and the ADRs. See the
 [architecture and demo plan](docs/implementation_architecture_and_demo_plan.md) and
-[demo commands](docs/demo_commands.md).
+[demo commands](docs/demo_commands.md). For an assessment-ready walkthrough, see the
+[user and assessment guide](docs/fods_assessment_demo_guide.md),
+[live demo script](docs/fods_live_demo_script.md),
+[setup checklist](docs/fods_demo_setup_checklist.md), and
+[artifact inventory](docs/fods_demo_artifact_inventory.md).
+
+For the teammate showcase, start with the [FODS Research Studio team handover](docs/team_handover.md).
 
 ```mermaid
 flowchart LR
@@ -499,6 +505,13 @@ they gate. Tests redirect all paths to `tmp_path` and never touch `data/`.
 | `docs/adr/0007-per-embedding-model-merge-thresholds.md` | per-embedding-space merge thresholds |
 | `docs/adr/` | all architecture decisions behind the LLM layer |
 | `docs/demo_commands.md` | command-by-command manual checks with expected output |
+| `docs/fods_assessment_demo_guide.md` | current application, architecture, modes, and limitations |
+| `docs/fods_live_demo_script.md` | presenter-ready 8–10 minute walkthrough |
+| `docs/fods_demo_setup_checklist.md` | environment, rehearsal, and fallback checks |
+| `docs/fods_demo_artifact_inventory.md` | artifacts, provenance, availability, and graph demo |
+| `docs/checkpoints/2026-11-01/PROJECT_STATE.md` | authoritative implementation and evidence checkpoint |
+| `docs/checkpoints/2026-11-01/NEXT_PHASE_PLAN.md` | gated benchmark/frontend milestones and acceptance criteria |
+| `docs/checkpoints/2026-11-01/SESSION_HANDOFF.md` | next-session starting point and immediate task |
 | `docs/env_loading.md` | how `.env` is found and resolved |
 | `PLAN.md` | milestones and acceptance gates |
 | `AGENTS.md` | conventions and gotchas for coding agents |

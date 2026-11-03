@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import json
 import threading
 import time
@@ -9,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from fods.events import EventLog
-from fods.webapp import NewRun, RunManager, make_server
+from fods.webapp import NewRun, RunHandle, RunManager, make_server
 from rla.config import Settings
 
 
@@ -28,6 +29,86 @@ def test_run_request_rejects_blank_input_and_unbounded_settings():
         NewRun(topic="  ", question="A valid question")
     with pytest.raises(ValidationError):
         NewRun(topic="Graph attention", question="A valid question", concurrency=99)
+    with pytest.raises(ValidationError, match="32-character snapshot hash"):
+        NewRun(topic="Graph attention", question="A valid question", context_id="bad-id")
+
+
+def test_live_web_run_rejects_fixture_planner_instead_of_presenting_it_as_live(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+
+    with pytest.raises(ValueError, match="fixture planner cannot be used for live research"):
+        manager.start(
+            NewRun(
+                topic="Graph attention",
+                question="What does the method do?",
+                mode="live",
+                planner="fixture",
+            )
+        )
+
+    with pytest.raises(ValueError, match="requires reuse_context"):
+        manager.start(
+            NewRun(
+                topic="Graph attention",
+                question="What does the method do?",
+                context_id="a" * 32,
+            )
+        )
+
+    with pytest.raises(FileNotFoundError, match="no saved context"):
+        manager.start(
+            NewRun(
+                topic="Graph attention",
+                question="What does the method do?",
+                mode="simulate",
+                planner="fixture",
+                reuse_context=True,
+                context_id="a" * 32,
+            )
+        )
+
+    with pytest.raises(ValueError, match="only in live research mode"):
+        manager.start(
+            NewRun(
+                topic="Graph attention",
+                question="What does the method do?",
+                mode="simulate",
+                planner="fixture",
+                fresh_sources=True,
+            )
+        )
+
+
+def test_web_run_passes_fresh_source_policy_to_production_executor(tmp_path, monkeypatch):
+    manager = RunManager(_settings(tmp_path))
+    captured = {}
+
+    def fake_execute(**kwargs):
+        captured.update(kwargs)
+
+        async def result():
+            return True
+
+        return result()
+
+    cli = importlib.import_module("fods.cli")
+    monkeypatch.setattr(cli, "_execute", fake_execute)
+    monkeypatch.setattr("asyncio.run", lambda awaitable: (awaitable.close(), True)[1])
+    assert cli._execute is fake_execute
+    request = NewRun(
+        topic="Fresh source policy test",
+        question="Were fresh sources requested?",
+        mode="live",
+        planner="ollama",
+        context_id="a" * 32,
+        fresh_sources=True,
+    )
+    event_handle = RunHandle("aabbccddeeff", "simulate", request.topic)
+    manager._execute(event_handle, request, EventLog(sink=event_handle.publish))
+
+    assert event_handle.finished
+    assert captured["fresh_sources"] is True
+    assert captured["context_id"] == "a" * 32
 
 
 def test_output_filename_cannot_escape_briefs_directory(tmp_path):
@@ -89,7 +170,22 @@ def test_api_serves_frontend_and_never_returns_credentials(tmp_path):
             page = response.read().decode()
         with urlopen(base + "/api/config", timeout=3) as response:
             config = response.read().decode()
+        with urlopen(base + "/shell.js", timeout=3) as response:
+            shell = response.read().decode()
+        with urlopen(base + "/shell-core.js", timeout=3) as response:
+            core = response.read().decode()
+        with urlopen(base + "/vendor/d3-path-3.1.0.min.js", timeout=3) as response:
+            d3_path = response.read().decode()
+        with urlopen(base + "/vendor/d3-shape-3.2.0.min.js", timeout=3) as response:
+            d3_shape = response.read().decode()
         assert "FODS Research Agent" in page
+        assert 'data-view="chat"' in page
+        assert "?legacy=1" in page
+        assert "EventSource" in shell
+        assert "deriveSnapshot" in core
+        assert "d3-shape" in page
+        assert d3_path.startswith("// https://d3js.org/d3-path/ v3.1.0")
+        assert d3_shape.startswith("// https://d3js.org/d3-shape/ v3.2.0")
         assert "private-test-secret" not in config
         assert '"gemini_key_configured": true' in config
     finally:

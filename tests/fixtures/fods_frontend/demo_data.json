@@ -1,0 +1,91 @@
+{
+  "dataset_label": "SYNTHETIC DEMONSTRATION DATA — NOT REAL RESEARCH RESULTS",
+  "dataset_id": "fods_frontend_demo_v1",
+  "purpose": "Deterministic frontend tests and teaching projections only; never submit these papers to live academic sources.",
+  "questions": [
+    {
+      "id": "Q-SYN-01",
+      "topic": "Synthetic graph attention example",
+      "question": "Which synthetic papers describe attention over graph neighbors?"
+    }
+  ],
+  "papers": [
+    {
+      "paper_id": "SYN-PAPER-01",
+      "title": "Synthetic Example: Local Neighbor Attention",
+      "year": 2024,
+      "abstract": "Synthetic demonstration record. The example assigns attention weights to neighboring graph nodes.",
+      "expected_relevance": "relevant",
+      "citation": "P1"
+    },
+    {
+      "paper_id": "SYN-PAPER-02",
+      "title": "Synthetic Example: Global Graph Mixing",
+      "year": 2023,
+      "abstract": "Synthetic demonstration record. The example mixes information across all graph nodes.",
+      "expected_relevance": "partially_relevant",
+      "citation": "P2"
+    },
+    {
+      "paper_id": "SYN-PAPER-03",
+      "title": "Synthetic Example: Garden Irrigation",
+      "year": 2022,
+      "abstract": "Synthetic demonstration record unrelated to graph learning.",
+      "expected_relevance": "not_relevant",
+      "citation": null
+    }
+  ],
+  "task_plan": {
+    "label": "Synthetic teaching plan; runtime event schema projection",
+    "tasks": [
+      {"id": "search_alpha", "tool": "synthetic_search", "depends_on": [], "priority": 10},
+      {"id": "search_beta", "tool": "synthetic_search", "depends_on": [], "priority": 30},
+      {"id": "search_gamma", "tool": "synthetic_search", "depends_on": [], "priority": 20},
+      {"id": "join_context", "tool": "synthetic_join", "depends_on": ["search_alpha", "search_beta", "search_gamma"], "priority": 5},
+      {"id": "select_evidence", "tool": "synthetic_select", "depends_on": ["join_context"], "priority": 0},
+      {"id": "draft_answer", "tool": "synthetic_answer", "depends_on": ["select_evidence"], "priority": 0}
+    ],
+    "fifo_order": ["search_alpha", "search_beta", "search_gamma"],
+    "priority_order": ["search_beta", "search_gamma", "search_alpha"]
+  },
+  "evidence_cards": [
+    {
+      "citation": "P1",
+      "paper_id": "SYN-PAPER-01",
+      "excerpt": "Synthetic evidence: attention weights neighboring nodes.",
+      "expected_relevance": "relevant"
+    },
+    {
+      "citation": "P2",
+      "paper_id": "SYN-PAPER-02",
+      "excerpt": "Synthetic evidence: information is mixed across the graph.",
+      "expected_relevance": "partially_relevant"
+    }
+  ],
+  "answer_scenarios": {
+    "success": {"answer": "Synthetic answer [P1]", "citation_ids": ["P1"], "valid": true},
+    "blocked": {"answer": "Synthetic answer [P99]", "citation_ids": ["P99"], "valid": false}
+  },
+  "illustrative_event_projection": {
+    "provenance": "Synthetic event projection for UI tests only; it is not a persisted production run.",
+    "worker_intervals_are_projected_from_task_start_and_terminal_events": true,
+    "events": [
+      {"seq": 1, "kind": "plan_received", "timestamp": 10.0, "payload": {"tasks": [{"id": "search_alpha", "tool": "synthetic_search", "depends_on": [], "priority": 10}, {"id": "search_beta", "tool": "synthetic_search", "depends_on": [], "priority": 30}, {"id": "join_context", "tool": "synthetic_join", "depends_on": ["search_alpha", "search_beta"], "priority": 5}] }},
+      {"seq": 2, "kind": "plan_validated", "timestamp": 10.1, "payload": {"levels": [["search_alpha", "search_beta"], ["join_context"]], "schedule": "priority"}},
+      {"seq": 3, "kind": "task_ready", "timestamp": 10.2, "payload": {"task_id": "search_alpha", "priority": 10}},
+      {"seq": 4, "kind": "queue_updated", "timestamp": 10.2, "payload": {"operation": "enqueue", "task_id": "search_alpha", "schedule": "priority", "priority": 10, "ready_queue": [{"task_id": "search_alpha", "priority": 10, "sequence": 0}]}},
+      {"seq": 5, "kind": "task_ready", "timestamp": 10.3, "payload": {"task_id": "search_beta", "priority": 30}},
+      {"seq": 6, "kind": "queue_updated", "timestamp": 10.3, "payload": {"operation": "enqueue", "task_id": "search_beta", "schedule": "priority", "priority": 30, "ready_queue": [{"task_id": "search_beta", "priority": 30, "sequence": 1}, {"task_id": "search_alpha", "priority": 10, "sequence": 0}]}},
+      {"seq": 7, "kind": "task_started", "timestamp": 10.4, "payload": {"task_id": "search_beta", "attempt": 1}},
+      {"seq": 8, "kind": "task_started", "timestamp": 10.5, "payload": {"task_id": "search_alpha", "attempt": 1}},
+      {"seq": 9, "kind": "stack_push", "timestamp": 10.5, "payload": {"task_id": "search_alpha", "stack": ["run:synthetic", "task:search_alpha"]}},
+      {"seq": 10, "kind": "task_completed", "timestamp": 11.0, "payload": {"task_id": "search_beta"}},
+      {"seq": 11, "kind": "task_completed", "timestamp": 11.2, "payload": {"task_id": "search_alpha"}},
+      {"seq": 12, "kind": "dependency_updated", "timestamp": 11.3, "payload": {"task_id": "join_context", "ready_eligible": true}},
+      {"seq": 13, "kind": "evidence_selected", "timestamp": 11.4, "payload": {"evidence": [{"citation": "P1", "paper": {"id": "SYN-PAPER-01", "title": "Synthetic Example: Local Neighbor Attention"}, "excerpt": "Synthetic evidence: attention weights neighboring nodes."}]}},
+      {"seq": 14, "kind": "answer_ready", "timestamp": 11.5, "payload": {"answer": "Synthetic answer [P1]"}},
+      {"seq": 15, "kind": "citation_validation", "timestamp": 11.6, "payload": {"valid": true, "found": ["P1"], "unknown": []}},
+      {"seq": 16, "kind": "run_finished", "timestamp": 11.7, "payload": {"succeeded": true, "termination_reason": "completed", "mode": "simulate"}}
+    ]
+  }
+}

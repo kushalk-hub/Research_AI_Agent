@@ -424,6 +424,11 @@ async def test_the_pipeline_runs_extraction_after_acquisition(settings, cache, m
     monkeypatch.setattr(
         "rla.pipeline.acquisition.build_sources", lambda *a, **k: {"fake": _OnePaperSource()}
     )
+    # This test covers acquisition/extraction ordering. Resolution is outside
+    # its scope, and its production embedder may call a provider configured in
+    # the developer's .env (including a local Ollama server). Keep this test
+    # hermetic while allowing the pipeline's name-only resolution path.
+    monkeypatch.setattr("rla.llm.factory.build_embedder", lambda *a, **k: None)
     from rla.pipeline.orchestrator import Pipeline, PipelineResult
 
     result = PipelineResult()
@@ -448,6 +453,9 @@ async def test_extraction_is_not_repeated_on_a_second_pipeline_run(settings, cac
     monkeypatch.setattr(
         "rla.pipeline.acquisition.build_sources", lambda *a, **k: {"fake": _OnePaperSource()}
     )
+    # Resolution is not under test here; do not make this resumability check
+    # depend on whatever embedding provider happens to be configured locally.
+    monkeypatch.setattr("rla.llm.factory.build_embedder", lambda *a, **k: None)
     from rla.pipeline.orchestrator import Pipeline
 
     first = PipelineLLM()

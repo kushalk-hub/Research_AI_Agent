@@ -1,8 +1,6 @@
 # FODS Research Agent Frontend Design Research
 
-**Status:** Frontend proposal only; frontend implementation is deferred until the backend CLI
-acceptance and human-reviewed retrieval benchmark in
-`docs/research_architecture_and_cli_acceptance.md` are complete.
+**Status:** Historical design research. Its Chat/session terminology and benchmark sequencing were superseded by the owner-directed Research Studio redesign in [`fods_research_studio_redesign.md`](fods_research_studio_redesign.md). The owner approved production implementation on 2026-11-01; this document remains research context, not the active production gate.
 **Research date:** 2026-10-29
 **Scope:** Frontend experience and the minimum backend/event changes needed to support it
 
@@ -22,9 +20,10 @@ This document is an implementation-ready frontend design specification based on 
 
 The Firecrawl website-design-clone workflow was attempted for the official reference site. Firecrawl returned an account-banned authorization error, so no Firecrawl capture, scrape, screenshot, or generated asset was used. The official DeepSeek product page was inspected visually in a browser, and its official repository and documentation were read. The documentation root did not expose readable page text through the web reader; the specific official quickstart and subsystem pages were readable. The product page uses illustrative product panels and is not evidence that every depicted control is part of a running application.
 
-This document remains a frontend design proposal. Backend behavior described as existing was
-observed at the time of research and must be checked against the active backend acceptance report;
-this proposal does not authorize frontend implementation in the backend-first milestone.
+This document remains historical frontend research. Backend behavior described as existing was
+observed at the time and must be checked against current source and acceptance evidence. Its
+proposals are retained as historical context; the owner-directed Research Studio proposal is
+authoritative for the redesign review.
 
 ## 3. Current implementation inventory
 
@@ -260,7 +259,7 @@ The CLI is the first acceptance surface. It must expose mode/profile, source and
 3. **Backend gate 3 — Extraction and graph:** use existing RLA extraction/store/graph contracts only after integrity checks; benchmark structured batch sizes of 3–5 papers; make extraction resumable by paper content, model, and schema version; retain source evidence type and evidence spans; keep citation and inferred-concept edges distinct.
 4. **Backend gate 4 — Answer integrity and CLI:** expose the full research controls and run summary in the CLI; enforce citation integrity; map claims to evidence; label semantic support unverified until a method is validated; keep answer output available when optional enrichment fails.
 5. **Backend gate 5 — Verification:** test workflow and failure modes through CLI/runtime seams, preserve old JSONL/API/SSE/offline HTML compatibility, run full regression, and compare the old five-paper baseline with the new path on the same human-reviewed questions. Do not claim quality improvement until the benchmark is human-reviewed.
-6. **Frontend gate — deferred:** only after the backend/CLI acceptance gate passes, redesign the app shell and Chat/Trace/FODS Visualizer against the stable runtime, event, and context contracts. Preserve the current working browser UI during all backend work; do not rebuild it in parallel.
+6. **Frontend gate — historical sequencing:** this earlier plan deferred frontend work until the backend/CLI gate passed. The owner later waived the human benchmark as a sequencing blocker and approved the Research Studio implementation. See [`fods_research_studio_redesign.md`](fods_research_studio_redesign.md) and the dated [`IMPLEMENTATION_BASELINE.md`](../checkpoints/2026-11-01/IMPLEMENTATION_BASELINE.md) for current direction/status.
 7. **Later research:** optional full-text sources, further citation snowballing, semantic citation review, and additional visualization polish after measured evidence and latency support the investment.
 
 The critical path for an early demo is items 1–5, using the existing runtime and deterministic scenarios. Do not start with a broad rewrite of the RLA pipeline; this design does not require one.

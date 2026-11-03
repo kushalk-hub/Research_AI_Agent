@@ -3,6 +3,9 @@
 Commands below are operational examples with provider and quota prerequisites called out. The
 exact checks completed for the current checkout are recorded in
 [`phase2_verification_report.md`](phase2_verification_report.md).
+For a faculty walkthrough, see the [assessment guide](fods_assessment_demo_guide.md),
+[timed demo script](fods_live_demo_script.md), [setup checklist](fods_demo_setup_checklist.md),
+and [artifact inventory](fods_demo_artifact_inventory.md).
 
 ```powershell
 # Activate once per shell
@@ -43,9 +46,18 @@ run ID and JSONL event trace under `data/fods/runs/`, and the reusable context u
 selection, citation validation, and the run summary. To inspect/replay a trace and generate its
 HTML visualization, use `python -m fods.cli replay "data/fods/runs/<run-id>.jsonl"`.
 
-The primary fixture run was not executed in this restricted Windows environment: asyncio setup
-fails before the runtime starts due to the already-diagnosed loopback socket restriction. See the
-[completion report](mvp_completion_report.md); no success output is fabricated here.
+The deterministic fixture acceptance command was executed successfully in GitHub Actions on
+branch `codex/fods-mvp-acceptance`, commit `f533ae1`, workflow run
+[41296050154](https://github.com/kushalk-hub/Research_AI_Agent/actions/runs/41296050154). The
+run ID was `a358ed9efa63`; it completed 8/8 tasks, selected four evidence cards from four context
+papers, and passed citation-ID validation for P1/P2/P3. The brief, JSONL trace, and HTML output
+were uploaded as `fods-mvp-acceptance`. Since `data/fods/` is ignored, those CI output files are
+not in this checkout; download the workflow artifact to inspect the exact accepted run.
+
+This does not change the earlier local Windows diagnostic: a browser request to the server's
+loopback URL was blocked/timed out in this environment. Server startup succeeded, but interactive
+browser access and a local end-to-end run were not rehearsed here. See the
+[completion report](mvp_completion_report.md) and [setup checklist](fods_demo_setup_checklist.md).
 
 ### Interactive browser visualizer
 

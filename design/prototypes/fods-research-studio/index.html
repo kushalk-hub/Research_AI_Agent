@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>FODS Research Studio — Design Prototype</title>
+  <link rel="stylesheet" href="studio.css">
+  <script src="studio.js" defer></script>
+</head>
+<body>
+  <div class="prototype-banner">STATIC DESIGN PROTOTYPE · SYNTHETIC EXAMPLE ONLY · NOT A LIVE RESEARCH RUN</div>
+  <div class="studio-shell">
+    <aside class="rail">
+      <a class="brand" href="#research" aria-label="FODS Research Studio home"><span class="brand-mark">F</span><span>FODS <i>Research Studio</i></span></a>
+      <button class="new-investigation" id="new-investigation">＋ New investigation</button>
+      <nav class="primary-nav" aria-label="Main navigation">
+        <button class="nav-item active" data-screen="research"><span class="nav-glyph">⌕</span>Research</button>
+        <button class="nav-item" data-screen="trace"><span class="nav-glyph">≋</span>Trace</button>
+        <button class="nav-item" data-screen="lab"><span class="nav-glyph">⌘</span>FODS Lab</button>
+        <button class="nav-item" data-screen="library"><span class="nav-glyph">▤</span>Library</button>
+      </nav>
+      <div class="rail-divider"></div>
+      <div class="rail-heading">RECENT INVESTIGATIONS <span>2</span></div>
+      <button class="recent-item selected" data-open-sample><span class="recent-dot sim"></span><span><b>Graph attention</b><small>Simulation · Completed</small></span></button>
+      <button class="recent-item" data-screen="library"><span class="recent-dot replay"></span><span><b>Retrieval trade-offs</b><small>Replay · 1 saved brief</small></span></button>
+      <div class="rail-bottom"><span class="avatar">R</span><span>Research workspace<small>Local demonstration</small></span><span class="more">···</span></div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="crumb"><span>Workspace</span><b>/</b><strong id="crumb-title">Research</strong></div>
+        <div class="top-actions"><span class="local-indicator"><i></i> Local prototype</span><button class="icon-button" aria-label="Help">?</button><span class="avatar small">RS</span></div>
+      </header>
+
+      <section class="screen active" id="screen-research" aria-labelledby="research-title">
+        <div class="research-empty" id="research-empty">
+          <div class="hero-kicker"><span class="rule"></span>RESEARCH, MADE TRACEABLE</div>
+          <h1 id="research-title">What do you want<br>to investigate<span>?</span></h1>
+          <p class="hero-copy">Start with a question. Follow how the FODS runtime gathers evidence, makes decisions, and builds your brief.</p>
+          <form class="question-form" id="question-form">
+            <label class="sr-only" for="question-input">Research question</label>
+            <textarea id="question-input" rows="3" placeholder="Ask a focused research question…">How do graph attention methods use information from neighboring nodes?</textarea>
+            <div class="form-footer"><label class="topic-input">TOPIC <input value="Graph attention networks" aria-label="Optional research topic"></label><button class="start-button" type="submit">Start investigation <span>↗</span></button></div>
+          </form>
+          <div class="mode-choice"><button class="mode-option" type="button" data-mode-choice="real"><span class="mode-radio"></span><span><b>Real research</b><small>Search configured academic sources</small></span></button><button class="mode-option selected" type="button" data-mode-choice="synthetic"><span class="mode-radio"></span><span><b>Synthetic demo</b><small>Deterministic example data</small></span><span class="demo-tag">SAFE DEMO</span></button></div>
+          <p class="prototype-only-note">Static prototype only · no research request is sent.</p>
+          <details class="advanced"><summary>Advanced execution settings <span>Optional</span></summary><div class="advanced-content">Scheduler, planner, worker limit, source count, and saved-context reuse appear here in the production design.</div></details>
+          <div class="suggestions"><div class="suggestion-heading">A few questions to get you started <span>✳</span></div><button>How does attention aggregate graph neighborhoods? <span>↗</span></button><button>What trade-offs appear in retrieval-augmented generation? <span>↗</span></button><button>Which methods explain uncertainty in graph learning? <span>↗</span></button></div>
+        </div>
+
+        <div class="research-result hidden" id="research-result">
+          <div class="selected-run-line"><div><span class="status-pill sim-pill">SIMULATION</span><span class="run-id">INV-SYN-0042</span><span class="run-status">Completed · synthetic fixture</span></div><button class="quiet-button" data-go="trace">Inspect trace ↗</button></div>
+          <div class="result-layout"><article class="brief">
+            <div class="brief-overline">RESEARCH BRIEF <span>·</span> SYNTHETIC EXAMPLE</div>
+            <h1>How graph attention uses neighboring nodes</h1>
+            <p class="submitted-question">Submitted question: “How do graph attention methods use information from neighboring nodes?”</p>
+            <div class="provenance-note"><span class="checkmark">✓</span><span><b>Citation IDs verified</b><small>Identifier check only · semantic support has not been evaluated</small></span></div>
+            <div class="brief-rule"></div>
+            <h2>Answer</h2>
+            <p>In this synthetic example, a graph attention layer assigns different weights to neighboring nodes and combines their representations. The weighting makes each neighbor's contribution explicit, while the result remains dependent on the selected neighborhood. <button class="citation" data-cite="P1">[P1]</button></p>
+            <p>A second synthetic record illustrates global mixing as a contrasting design. It is only partially relevant to the question, so it appears as context rather than direct support. <button class="citation" data-cite="P2">[P2]</button></p>
+            <h2>Evidence used</h2>
+            <button class="evidence-row" data-cite="P1"><span class="cite-square">P1</span><span><b>Synthetic Example: Local Neighbor Attention</b><small>2024 · fixture record · selected excerpt available</small></span><span class="arrow">↗</span></button>
+            <button class="evidence-row" data-cite="P2"><span class="cite-square muted-cite">P2</span><span><b>Synthetic Example: Global Graph Mixing</b><small>2023 · fixture record · selected excerpt available</small></span><span class="arrow">↗</span></button>
+            <div class="followup"><div><b>Continue this investigation?</b><small>This starts a linked run. Context reuse or new source retrieval must be chosen explicitly.</small></div><button class="outline-button" id="follow-up">New linked investigation <span>↗</span></button></div>
+          </article><aside class="result-aside"><div class="aside-label">INVESTIGATION RECORD</div><dl><dt>Execution</dt><dd>Synthetic demonstration</dd><dt>Run identity</dt><dd>INV-SYN-0042</dd><dt>Question status</dt><dd>Completed</dd><dt>Evidence</dt><dd>2 synthetic records</dd><dt>Brief</dt><dd><span class="ready-dot"></span> Available in prototype</dd></dl><button class="dark-button" data-go="lab">Explore FODS execution ↗</button><p class="aside-disclaimer">Prototype content is illustrative. It is not a real literature search or quality evaluation.</p></aside></div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-trace" aria-labelledby="trace-title">
+        <div class="screen-heading"><div><div class="hero-kicker"><span class="rule"></span>OBSERVABILITY</div><h1 id="trace-title">Trace</h1><p>Read the run as a sequence of recorded events. Relationships appear only where the event record supports them.</p></div><span class="status-pill sim-pill">SIMULATION · INV-SYN-0042</span></div>
+        <div class="trace-toolbar"><div class="trace-filter"><span>⌕</span><input id="trace-search" placeholder="Filter events…" aria-label="Filter trace events"></div><button class="filter-chip active" data-filter="all">All events</button><button class="filter-chip" data-filter="FODS">FODS tasks</button><button class="filter-chip" data-filter="Evidence">Evidence</button><button class="filter-chip" data-filter="Output">Output</button><span class="trace-count">19 illustrative events</span></div>
+        <div class="trace-ruler"><span>EVENT</span><span>RECORDED ACTIVITY</span><span>SEQUENCE</span><span>TIME</span><span>STATE</span></div>
+        <div id="trace-events" class="trace-list"></div>
+        <aside class="trace-inspector"><div class="inspector-heading"><span>SELECTED EVENT</span><button aria-label="Collapse event inspector">−</button></div><div id="trace-detail"><b>Select an event to inspect its recorded details.</b></div><details><summary>Raw event payload</summary><pre id="trace-raw">No event selected.</pre></details></aside>
+      </section>
+
+      <section class="screen lab-screen" id="screen-lab" aria-labelledby="lab-title">
+        <div class="screen-heading lab-heading"><div><div class="hero-kicker"><span class="rule"></span>EXECUTION ENGINE</div><h1 id="lab-title">FODS Lab</h1><p>Watch the data structures govern this investigation. Move through the recorded event view.</p></div><span class="status-pill sim-pill">SYNTHETIC DEMO</span></div>
+        <div class="lab-run-strip"><div><span class="state-square active-square"></span><b>INV-SYN-0042</b><span>Graph attention · FIFO deque</span></div><span id="event-description">Select an event to begin the guided view.</span></div>
+        <div class="lab-controls"><button id="play-events">▶ Play</button><button id="pause-events">Ⅱ Pause</button><button id="back-event">← Step</button><button id="next-event">Step →</button><button id="reset-events">Reset</button><input id="event-slider" type="range" min="0" max="18" value="0" aria-label="Shared event position"><span id="event-position">01 / 19</span><button id="speed-chip" class="speed-chip" aria-label="Change playback speed">1×</button></div>
+        <div class="lab-tabs"><button class="active" data-labtab="dag">Dependency DAG</button><button data-labtab="scheduler">Scheduler</button><button data-labtab="state">State & stacks</button></div>
+        <div class="lab-panels">
+          <section class="lab-panel dag-panel" data-labpanel="dag"><div class="panel-topline"><div><span class="panel-number">01</span><h2>Dependency graph</h2><p>Fan-out creates parallel work; fan-in waits for every prerequisite.</p></div><span class="event-source">FROM SYNTHETIC EVENT FIXTURE</span></div>
+            <div class="dag-canvas"><svg class="dag-edges" viewBox="0 0 880 320" aria-label="Synthetic task dependency graph"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#668994"/></marker></defs><path d="M220 79 C310 79 300 140 386 140"/><path d="M220 237 C310 237 300 176 386 176"/><path d="M520 158 C596 158 580 96 666 96"/><path d="M750 128 L750 182"/></svg>
+              <button class="dag-node source-node done" data-task="search_alpha" style="left:4%;top:14%"><small>SOURCE TASK</small><b>search_alpha</b><span>✓ completed</span></button>
+              <button class="dag-node source-node done" data-task="search_beta" style="left:4%;top:64%"><small>SOURCE TASK</small><b>search_beta</b><span>✓ completed</span></button>
+              <button class="dag-node merge-node" data-task="merge" style="left:43%;top:39%"><small>FAN-IN</small><b>merge</b><span>waiting on inputs</span></button>
+              <button class="dag-node result-node" data-task="select_evidence" style="left:76%;top:20%"><small>EVIDENCE</small><b>select_evidence</b><span>queued</span></button>
+              <button class="dag-node result-node" data-task="draft_answer" style="left:76%;top:59%"><small>ANSWER</small><b>draft_answer</b><span>queued</span></button>
+            </div><div class="selected-task"><span class="task-icon">▤</span><span><small>SELECTED TASK</small><b id="selected-task-name">search_alpha</b></span><span class="task-fact">Prerequisites <b id="task-prereqs">None</b></span><span class="task-fact">State <b id="task-state">Started</b></span><button data-go="trace">Inspect events ↗</button></div>
+          </section>
+          <section class="lab-panel scheduler-panel hidden" data-labpanel="scheduler"><div class="panel-topline"><div><span class="panel-number">02</span><h2>Scheduler in motion</h2><p>Queue actions are driven by recorded enqueue/dequeue events.</p></div><span class="event-source">OBSERVED ORDER · SYNTHETIC</span></div><div class="queue-card"><div class="queue-title"><span>FIFO READY DEQUE</span><small>Front to rear</small></div><div class="queue-lane"><span class="queue-end">FRONT</span><div class="queue-items" id="queue-items"></div><span class="queue-end">REAR</span></div><div class="queue-note" id="queue-note">Illustrative teaching queue; observed snapshots are shown when available.</div></div><div class="heap-card"><div class="heap-heading"><div><span>PRIORITY QUEUE</span><b>Conceptual heap</b></div><span class="concept-tag">CONCEPT MODEL · NOT RECONSTRUCTED</span></div><div class="heap-tree"><div class="heap-level"><span class="heap-node root">30<small>beta</small></span></div><div class="heap-level"><span class="heap-node">10<small>alpha</small></span></div><div class="heap-edges">↓</div></div><p class="heap-note">The priority example explains heap ordering. This diagram is not presented as the internal heap at any real event cursor.</p></div><div class="concurrency"><div class="panel-topline"><div><span class="panel-number">03</span><h2>Concurrent execution</h2><p>Timeline lanes are inferred from overlapping task start/end events.</p></div><span class="inferred-tag">INFERRED · NO WORKER IDS RECORDED</span></div><div class="time-lanes"><div><span>search_alpha</span><i class="lane-bar lane-a"></i></div><div><span>search_beta</span><i class="lane-bar lane-b"></i></div><div class="time-axis"><span>0.0s</span><span>0.5s</span><span>1.0s</span><span>1.5s</span></div></div></div></section>
+          <section class="lab-panel state-panel hidden" data-labpanel="state"><div class="panel-topline"><div><span class="panel-number">04</span><h2>Task-state dictionary</h2><p>Ordinary key/value mapping · no hash buckets or collision animation.</p></div><span class="event-source">STATE AT SHARED CURSOR</span></div><div class="dictionary" id="dictionary"><div class="dict-head"><span>KEY · TASK ID</span><span>VALUE · STATE</span></div></div><div class="stacks-layout"><div><div class="panel-topline"><div><span class="panel-number">05</span><h2>Per-task stacks</h2><p>Last in, first out · each task has its own stack.</p></div></div><div id="stack-columns" class="stack-columns"></div></div><aside class="stack-event"><span class="event-source">CURRENT STACK EVENT</span><b id="stack-event-title">No stack operation selected</b><p id="stack-event-copy">Step through the event sequence to inspect push/pop behavior.</p></aside></div></section>
+        </div>
+        <div class="lesson-note"><span class="spark">✳</span><span><b>What to notice</b><small id="lesson-copy">Two independent source tasks fan into one merge task.</small></span><label class="lesson-select">GUIDED LESSON <select id="lesson-select"><option value="dag">DAG readiness</option><option value="queue">FIFO vs priority</option><option value="concurrency">Bounded concurrency</option><option value="state">Task-state map</option><option value="stack">Stack push/pop</option><option value="recovery">Failure and recovery</option></select></label><button data-go="trace">See triggering event ↗</button></div>
+      </section>
+
+      <section class="screen" id="screen-library" aria-labelledby="library-title">
+        <div class="screen-heading"><div><div class="hero-kicker"><span class="rule"></span>YOUR RESEARCH RECORDS</div><h1 id="library-title">Library</h1><p>Saved investigations and reusable contexts, shown as separate records.</p></div><button class="start-button" data-screen="research">＋ New investigation</button></div><div class="library-tabs"><button class="active" data-library="investigations">Investigations <span>2</span></button><button data-library="contexts">Saved contexts <span>1</span></button></div><div class="library-search"><span>⌕</span><input id="library-search-input" placeholder="Search investigations" aria-label="Search library"></div><div id="library-items" class="library-list"></div><div class="library-note">Replay opens the saved event history. It does not perform new retrieval or model calls.</div>
+      </section>
+    </main>
+    <aside id="evidence-drawer" class="evidence-drawer" aria-live="polite"><button class="drawer-close" id="close-drawer" aria-label="Close evidence">×</button><div class="drawer-label">SYNTHETIC EVIDENCE RECORD</div><span class="cite-square" id="drawer-cite">P1</span><h2 id="drawer-title">Synthetic Example: Local Neighbor Attention</h2><p id="drawer-meta">2024 · demonstration record</p><div class="drawer-rule"></div><h3>Stored excerpt</h3><blockquote id="drawer-excerpt">Synthetic evidence: attention weights neighboring nodes.</blockquote><p class="drawer-disclaimer">Synthetic teaching text. Not a real paper or evidence claim.</p></aside>
+    <div id="prototype-notice" class="prototype-notice" role="status"></div>
+  </div>
+</body>
+</html>

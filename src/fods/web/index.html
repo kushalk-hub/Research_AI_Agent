@@ -7,8 +7,111 @@
     <title>FODS Research Agent</title>
     <link rel="stylesheet" href="/styles.css" />
     <script src="/app.js" defer></script>
+    <script src="/vendor/d3-path-3.1.0.min.js" defer></script>
+    <script src="/vendor/d3-shape-3.2.0.min.js" defer></script>
+    <script src="/shell-core.js" defer></script>
+    <script src="/shell.js" defer></script>
   </head>
   <body>
+    <div id="modern-shell">
+      <header class="shell-topbar">
+        <a class="shell-brand" href="#research" aria-label="FODS Research Studio home">
+          <span class="shell-mark">F</span>
+          <span><strong>FODS Research Studio</strong><small>Research workspace</small></span>
+        </a>
+        <div class="shell-header-status">
+          <span id="shell-connection" class="shell-connection">Connecting to local runtime</span>
+          <span class="shell-local-tag">LOCAL WORKSPACE</span>
+          <a class="shell-legacy-link" href="/?legacy=1">Open classic workbench</a>
+        </div>
+      </header>
+
+      <div class="shell-layout">
+        <aside class="shell-sidebar" aria-label="Research navigation and recent runs">
+          <button id="shell-new-run" class="shell-new-run" type="button">＋ New investigation</button>
+          <nav class="shell-nav" aria-label="Primary views">
+            <button class="shell-nav-item active" data-view="chat" type="button"><span>01</span>Research</button>
+            <button class="shell-nav-item" data-view="trace" type="button"><span>02</span>Trace</button>
+            <button class="shell-nav-item" data-view="visualizer" type="button"><span>03</span>FODS Lab</button>
+            <button class="shell-nav-item" data-view="library" type="button"><span>04</span>Library</button>
+          </nav>
+          <div class="shell-recent-heading"><span>RECENT RUNS</span><button id="shell-refresh-history" type="button" aria-label="Refresh recent runs">↻</button></div>
+          <div id="shell-history" class="shell-history"><p class="shell-muted">Loading saved runs…</p></div>
+          <p class="shell-sidebar-note">Run history is persisted. This interface does not create a multi-turn conversation backend.</p>
+        </aside>
+
+        <main class="shell-main">
+          <div id="shell-data-banner" class="shell-data-banner" role="status" hidden></div>
+
+          <section class="shell-view active" id="shell-view-chat" aria-labelledby="shell-chat-title">
+            <div class="shell-page-heading">
+              <div><p class="shell-eyebrow">QUESTION → EVIDENCE → BRIEF</p><h1 id="shell-chat-title">What do you want to investigate?</h1><p>Start a research run, follow the runtime, and inspect the sources behind its brief.</p></div>
+              <div class="shell-provenance"><span id="shell-mode-badge" class="shell-mode-badge">READY</span><span id="shell-run-id">No run selected</span></div>
+            </div>
+            <div class="shell-chat-grid">
+              <form id="shell-run-form" class="shell-panel shell-composer">
+                <div class="shell-panel-heading"><div><h2>New investigation</h2><p>Each submission creates a separate run. You can reopen it later from Library.</p></div></div>
+                <label for="shell-question">Research question</label>
+                <textarea id="shell-question" name="question" rows="4" minlength="3" maxlength="1000" placeholder="For example: How do graph attention networks aggregate information from neighboring nodes?" required></textarea>
+                <label for="shell-topic">Topic <span class="shell-muted">optional</span></label>
+                <input id="shell-topic" name="topic" minlength="3" maxlength="300" placeholder="Use a short topic label or leave blank" />
+                <div class="shell-form-grid shell-primary-settings">
+                  <div><label for="shell-mode">Research mode</label><select id="shell-mode" name="mode"><option value="live" selected>Fresh live research</option><option value="simulate">Deterministic simulation</option></select></div>
+                  <div class="shell-context-row"><label><input id="shell-reuse-context" type="checkbox" /> Reuse saved context</label><select id="shell-context"><option value="">Choose topic context</option></select></div>
+                </div>
+                <details class="shell-advanced"><summary>Advanced execution settings</summary>
+                  <div class="shell-form-grid">
+                    <div><label for="shell-planner">Planner</label><select id="shell-planner" name="planner"><option value="auto" selected>Configured planner</option><option value="ollama">Ollama</option><option value="fixture">Fixture planner (simulation only)</option></select></div>
+                    <div><label for="shell-schedule">Scheduler</label><select id="shell-schedule" name="schedule"><option value="fifo">FIFO</option><option value="priority">Priority</option></select></div>
+                    <div><label for="shell-concurrency">Concurrency limit</label><input id="shell-concurrency" type="number" min="1" max="8" value="3" /></div>
+                    <div><label for="shell-source-limit">Source limit</label><input id="shell-source-limit" type="number" min="2" max="5" value="3" /></div>
+                    <div><label for="shell-output-name">Brief filename</label><input id="shell-output-name" maxlength="80" placeholder="optional-run-name.md" /></div>
+                  </div>
+                  <label class="shell-fresh-row"><input id="shell-fresh-sources" type="checkbox" /> Bypass the source cache for this run</label>
+                </details>
+                <p id="shell-mode-note" class="shell-note">Live research uses configured providers and academic sources. Provider failures are shown in the run trace.</p>
+                <button id="shell-submit" class="shell-primary" type="submit">Start investigation</button>
+                <p id="shell-error" class="shell-error" role="alert"></p>
+              </form>
+              <div class="shell-chat-side">
+                <section class="shell-panel"><div class="shell-panel-heading"><div><h2>Provider configuration</h2><p>Names come from server settings. Reachability is confirmed only by a real provider call.</p></div></div><div id="shell-provider-readiness" class="shell-provider-readiness"><p class="shell-muted">Loading configured providers…</p></div></section>
+                <section class="shell-panel"><div class="shell-panel-heading"><div><h2>Run plan</h2><p id="shell-plan-summary">Submit a question to see the validated task plan.</p></div></div><div id="shell-plan-tasks" class="shell-plan-list"><p class="shell-muted">The runtime plan will appear here.</p></div></section>
+                <section class="shell-panel"><div class="shell-panel-heading"><div><h2>Run progress</h2><p id="shell-progress-summary">No run selected.</p></div></div><div id="shell-progress" class="shell-progress-list"><p class="shell-muted">Task transitions will appear here.</p></div></section>
+              </div>
+            </div>
+            <section class="shell-panel shell-answer-panel"><div class="shell-panel-heading"><div><h2>Answer and evidence</h2><p>Click a citation to inspect its selected evidence card.</p></div><span id="shell-answer-model" class="shell-attribution">No answer yet</span></div><blockquote id="shell-run-question" class="shell-run-question" hidden></blockquote><div id="shell-answer" class="shell-answer"><p class="shell-muted">The completed brief answer will appear here.</p></div><p id="shell-citation-status" class="shell-citation-status">Citation validation has not run.</p><div id="shell-evidence-cards" class="shell-evidence-grid"></div><div id="shell-brief-link" class="shell-brief-link"></div></section>
+          </section>
+
+          <section class="shell-view" id="shell-view-trace" aria-labelledby="shell-trace-title">
+            <div class="shell-page-heading"><div><p class="shell-eyebrow">RECORDED RUNTIME ACTIVITY</p><h1 id="shell-trace-title">Trace</h1><p>Inspect the event stream as recorded. Times and provider identities are shown only when present in the run.</p></div><div class="shell-provenance"><span id="shell-trace-mode" class="shell-mode-badge">NO RUN</span><span id="shell-trace-count">0 events</span></div></div>
+            <div class="shell-trace-filters"><label for="shell-trace-filter">Find in trace</label><input id="shell-trace-filter" type="search" placeholder="Event, task, source, provider, or message" /><label for="shell-trace-kind">Event type</label><select id="shell-trace-kind"><option value="">All event types</option></select></div>
+            <div class="shell-trace-grid"><section class="shell-panel"><div id="shell-trace-events" class="shell-trace-events"><p class="shell-muted">Select or start a run to inspect events.</p></div></section><section class="shell-panel"><div class="shell-panel-heading"><div><h2>Selected event</h2><p>Inspect the event fields recorded by the runtime.</p></div></div><div id="shell-event-details" class="shell-event-details"><p class="shell-muted">No event selected.</p></div></section></div>
+          </section>
+
+          <section class="shell-view" id="shell-view-visualizer" aria-labelledby="shell-visualizer-title">
+            <div class="shell-page-heading"><div><p class="shell-eyebrow">FODS DATA STRUCTURES</p><h1 id="shell-visualizer-title">FODS Visualizer</h1><p>All panels are projections of the selected event stream. Backward stepping changes the view only; it does not reverse runtime effects.</p></div><div class="shell-provenance"><span id="shell-viz-mode" class="shell-mode-badge">NO RUN</span><span id="shell-viz-schedule">—</span></div></div>
+            <div class="shell-playback shell-panel"><button id="shell-play" type="button">Play</button><button id="shell-pause" type="button">Pause</button><button id="shell-step-back" type="button" aria-label="Step backward">← Step</button><button id="shell-step-forward" type="button" aria-label="Step forward">Step →</button><button id="shell-reset" type="button">Reset</button><label for="shell-speed">Playback speed</label><select id="shell-speed"><option value="800">Slow</option><option value="350" selected>Normal</option><option value="100">Fast</option></select><input id="shell-event-cursor" type="range" min="0" max="0" value="0" aria-label="Recorded event position" /><span id="shell-event-position">0 / 0</span><button id="shell-viz-follow" type="button" aria-pressed="true">Follow live events</button><button id="shell-compare-schedulers" type="button">Compare FIFO / priority</button></div>
+            <div class="shell-demo-actions shell-panel"><strong>Controlled runtime demonstrations</strong><button id="shell-demo-cycle" type="button">Cycle rejection</button><button id="shell-demo-failure" type="button">Bounded source failure</button><button id="shell-demo-citation" type="button">Citation guard</button><small>All three execute deterministic simulated runtime scenarios.</small></div>
+            <div class="shell-viz-grid">
+              <section class="shell-panel shell-dag-panel"><div class="shell-panel-heading"><div><h2>Dependency DAG</h2><p>Edges and readiness are read from the accepted plan and events.</p></div><span id="shell-task-count" class="shell-subtle">No plan</span></div><svg id="shell-dag" role="img" aria-label="Task dependency graph"></svg><div id="shell-dag-empty" class="shell-empty">Start a run or replay a recorded run.</div></section>
+              <section class="shell-panel"><div class="shell-panel-heading"><div><h2>Ready queue</h2><p>Recorded enqueue and dequeue state</p></div></div><div id="shell-ready-queue" class="shell-list"><p class="shell-muted">No queue events.</p></div></section>
+              <section class="shell-panel"><div class="shell-panel-heading"><div><h2>Concurrent task activity</h2><p>Tasks shown as active at this event. Runtime traces do not identify worker slots.</p></div></div><div id="shell-workers" class="shell-list"><p class="shell-muted">No active tasks.</p></div></section>
+              <section class="shell-panel"><div class="shell-panel-heading"><div><h2>Task-state map</h2><p>Task ID → current recorded state</p></div></div><div id="shell-task-states" class="shell-list"><p class="shell-muted">No task states.</p></div></section>
+              <section class="shell-panel"><div class="shell-panel-heading"><div><h2>Per-task stacks and recovery</h2><p>Recorded push/pop and recovery decisions</p></div></div><div id="shell-stacks" class="shell-list"><p class="shell-muted">No stack events.</p></div></section>
+              <section class="shell-panel"><div class="shell-panel-heading"><div><h2>Event cursor</h2><p id="shell-selected-event-label">Select an event in Trace.</p></div></div><div id="shell-selected-event" class="shell-event-details"><p class="shell-muted">No event selected.</p></div></section>
+            </div>
+            <section class="shell-panel shell-comparison-panel"><div class="shell-panel-heading"><div><h2>Scheduler comparison</h2><p>Runs the same fixture request twice and compares recorded dequeue order.</p></div></div><div id="shell-queue-comparison" class="shell-comparison-grid"><p class="shell-muted">Run both deterministic schedules to compare dequeue events.</p></div></section>
+          </section>
+
+          <section class="shell-view" id="shell-view-library" aria-labelledby="shell-library-title">
+            <div class="shell-page-heading"><div><p class="shell-eyebrow">SAVED WORK</p><h1 id="shell-library-title">Library</h1><p>Reopen persisted investigations or start from saved research contexts.</p></div><button id="shell-library-refresh" class="shell-secondary" type="button">Refresh library</button></div>
+            <div class="shell-library-grid"><section class="shell-panel"><div class="shell-panel-heading"><div><h2>Investigations</h2><p>Completed, partial, failed, and replayable runs from the local run history.</p></div></div><div id="shell-library-runs" class="shell-history"></div></section><section class="shell-panel"><div class="shell-panel-heading"><div><h2>Saved contexts</h2><p>Previously stored topic contexts from the backend.</p></div></div><div id="shell-library-contexts" class="shell-context-library"></div></section></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div id="legacy-app" hidden>
     <header class="topbar">
       <a class="brand" href="#overview" aria-label="FODS Research Agent home">
         <span class="brand-mark">F</span>
@@ -132,5 +235,6 @@
     </main>
     <footer><span>FODS controls task execution. The interface renders recorded runtime decisions.</span><a href="/" aria-label="Return to overview">Local demo interface</a></footer>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </div>
   </body>
 </html>

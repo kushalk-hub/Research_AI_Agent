@@ -198,7 +198,15 @@ def test_an_unknown_provider_is_a_configuration_error_not_a_silent_default(tmp_p
 def test_the_keyless_case_still_degrades_rather_than_raising(tmp_path):
     """Degrade mode is a product feature: acquisition works with no key."""
     settings = Settings(
+        _env_file=None,
         gemini_api_key="",
+        llm_provider="gemini",
+        fast_model="gemini-2.5-flash-lite",
+        strong_model="gemini-2.5-flash",
+        embedding_model="gemini-embedding-001",
+        structured_model="",
+        answer_model="",
+        fallback_models="gemini-2.5-flash",
         data_dir=tmp_path,
         raw_dir=tmp_path / "raw",
         graph_dir=tmp_path / "graph",
@@ -251,7 +259,13 @@ def test_a2_every_production_schema_is_a_valid_json_schema():
 
 def test_a2_the_gemini_backend_declares_structured_support_for_text_models(tmp_path):
     settings = Settings(
+        _env_file=None,
         gemini_api_key="k",
+        fast_model="gemini-2.5-flash-lite",
+        strong_model="gemini-2.5-flash",
+        embedding_model="gemini-embedding-001",
+        structured_model="",
+        answer_model="",
         data_dir=tmp_path,
         raw_dir=tmp_path / "raw",
         graph_dir=tmp_path / "graph",
@@ -497,7 +511,15 @@ def test_a7_every_default_model_is_priced():
     """
     from rla.store.cache import price_for
 
-    settings = Settings(_env_file=None)
+    settings = Settings(
+        _env_file=None,
+        fast_model="gemini-2.5-flash-lite",
+        strong_model="gemini-2.5-flash",
+        embedding_model="gemini-embedding-001",
+        structured_model="",
+        answer_model="",
+        fallback_models="gemini-2.5-flash",
+    )
     for model in (
         settings.fast_model,
         settings.strong_model,
@@ -566,6 +588,12 @@ def test_no_usable_provider_still_degrades(tmp_path):
         _env_file=None,
         gemini_api_key="",
         llm_provider="gemini",
+        fast_model="gemini-2.5-flash-lite",
+        strong_model="gemini-2.5-flash",
+        embedding_model="gemini-embedding-001",
+        structured_model="",
+        answer_model="",
+        fallback_models="gemini-2.5-flash",
         data_dir=tmp_path,
         raw_dir=tmp_path / "raw",
         graph_dir=tmp_path / "graph",

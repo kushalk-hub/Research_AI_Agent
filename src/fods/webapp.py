@@ -44,6 +44,7 @@ class NewRun(BaseModel):
     source_limit: int = Field(default=3, ge=2, le=5)
     output_name: str = ""
     reuse_context: bool = False
+    context_id: str = ""
     fresh_sources: bool = False
     inject_cycle: bool = False
     invalid_citation: bool = False
@@ -63,6 +64,14 @@ class NewRun(BaseModel):
     def unique_fail_sources(cls, value: list[str]) -> list[str]:
         if len(value) != len(set(value)):
             raise ValueError("fail_sources must not contain duplicates")
+        return value
+
+    @field_validator("context_id")
+    @classmethod
+    def valid_context_id(cls, value: str) -> str:
+        value = value.strip()
+        if value and not re.fullmatch(r"[a-f0-9]{32}", value):
+            raise ValueError("context_id must be a 32-character snapshot hash")
         return value
 
 
@@ -123,7 +132,7 @@ class RunManager:
             "providers": {role: model.split("/", 1)[0] for role, model in models.items()},
             "gemini_key_configured": bool(settings.gemini_api_key),
             "gemini_opted_in": os.getenv("RLA_FODS_ALLOW_GEMINI") == "1",
-            "source_names": list(FIXTURE_PAPERS),
+            "source_names": settings.enabled_sources(),
             "source_quorum": 2,
             "modes": ["live", "simulate", "replay"],
         }
@@ -143,8 +152,30 @@ class RunManager:
             raise ValueError(f"unknown demo source(s): {', '.join(sorted(unknown))}")
         if request.fail_sources and request.mode != "simulate":
             raise ValueError("controlled source failures are available only in simulation mode")
+        if request.fresh_sources and request.mode != "live":
+            raise ValueError("source-cache bypass is available only in live research mode")
+        if request.context_id and not request.reuse_context:
+            raise ValueError("selecting a saved context requires reuse_context")
+        if request.context_id and request.fresh_sources:
+            raise ValueError("saved-context reuse cannot bypass source retrieval cache")
+        if request.context_id:
+            from fods.tools import read_context_snapshot
+
+            read_context_snapshot(self.settings.data_dir, request.topic, request.context_id)
         if request.mode == "simulate" and request.planner == "ollama":
             raise ValueError("deterministic simulation uses the fixture planner")
+        if request.mode == "live" and not request.reuse_context:
+            if request.planner == "fixture":
+                raise ValueError("fixture planner cannot be used for live research")
+            planner_model = self.settings.canonical_model(self.settings.model_for_structured)
+            planner_provider = planner_model.split("/", 1)[0]
+            if planner_provider != "ollama":
+                raise ValueError(
+                    "live research requires a configured Ollama structured planner; "
+                    f"configured provider is {planner_provider}"
+                )
+            if request.planner == "auto":
+                request = request.model_copy(update={"planner": "ollama"})
         if request.inject_cycle and request.reuse_context:
             raise ValueError("cycle demonstration requires a new simulated research plan")
         if request.invalid_citation and request.mode != "simulate":
@@ -201,12 +232,14 @@ class RunManager:
                     schedule=request.schedule,
                     concurrency=request.concurrency,
                     reuse_context=request.reuse_context,
+                    context_id=request.context_id,
                     fail_sources=fail_sources,
                     inject_cycle=request.inject_cycle,
                     invalid_citation=request.invalid_citation,
                     simulated_delay=request.delay_ms / 1000,
                     event_file=handle.event_path,
                     source_limit=request.source_limit,
+                    fresh_sources=request.fresh_sources,
                     run_id=handle.run_id,
                     event_log=event_log,
                     print_cli=False,
@@ -437,6 +470,20 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                 return self._static("app.js", "text/javascript; charset=utf-8")
             if path == "/styles.css":
                 return self._static("styles.css", "text/css; charset=utf-8")
+            if path == "/shell.js":
+                return self._static("shell.js", "text/javascript; charset=utf-8")
+            if path == "/shell-core.js":
+                return self._static("shell-core.js", "text/javascript; charset=utf-8")
+            if path == "/vendor/d3-path-3.1.0.min.js":
+                return self._static("vendor/d3-path-3.1.0.min.js", "text/javascript; charset=utf-8")
+            if path == "/vendor/d3-shape-3.2.0.min.js":
+                return self._static(
+                    "vendor/d3-shape-3.2.0.min.js", "text/javascript; charset=utf-8"
+                )
+            if path == "/vendor/D3_PATH_LICENSE.txt":
+                return self._static("vendor/D3_PATH_LICENSE.txt", "text/plain; charset=utf-8")
+            if path == "/vendor/D3_SHAPE_LICENSE.txt":
+                return self._static("vendor/D3_SHAPE_LICENSE.txt", "text/plain; charset=utf-8")
             if path == "/api/health":
                 return self._json(200, {"ok": True})
             if path == "/api/config":

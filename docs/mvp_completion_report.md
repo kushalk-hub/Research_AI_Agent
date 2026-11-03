@@ -1,13 +1,22 @@
 # FODS Research Agent MVP Completion Report
 
-**Status: PARTIALLY COMPLETE** (2026-11-01)
+**Backend acceptance: PASSED in CI** (2026-11-01). **Human-reviewed retrieval quality: PENDING.**
+
+This report originally recorded a local Windows run blocker. That historical observation remains
+accurate for the local environment at that time, but it has been superseded for backend acceptance
+by the successful GitHub Actions run documented in the [CI acceptance closeout](#ci-acceptance-closeout).
+The project-level retrieval-quality gate remains separate and incomplete until the benchmark rows
+receive independent human labels.
+
+The faculty-facing walkthrough package is in the [assessment guide](fods_assessment_demo_guide.md),
+[live demo script](fods_live_demo_script.md), [setup checklist](fods_demo_setup_checklist.md), and
+[artifact inventory](fods_demo_artifact_inventory.md).
 
 FODS is the primary research-to-brief application in this repository. Its main workflow and the
 optional graph follow-up path are implemented. The graph path was exercised against an isolated
-copy of the saved Graph Attention Networks context and enrichment artifacts. The complete FODS
-fixture question-to-brief command could not be executed here: asyncio fails during loopback
-self-pipe initialization before the runtime starts. No successful run, run ID, or brief is claimed
-for this completion pass.
+copy of the saved Graph Attention Networks context and enrichment artifacts. In the original
+local Windows verification pass, loopback restrictions prevented an end-to-end run; the later CI
+acceptance closeout below ran and validated the deterministic fixture workflow successfully.
 
 ## Application relationship and architecture
 
@@ -53,11 +62,10 @@ python -m fods.cli run --topic "Graph Attention Networks" `
   --mode simulate --planner fixture
 ```
 
-This command was **not executed** in this environment. The already-diagnosed Windows loopback
-restriction prevents asyncio from creating its self-pipe before `run_plan` starts. The requested
-output path was checked and was available, but no brief or new FODS run trace was created. There
-is therefore no run ID, task outcome list, evidence-selection event, citation-validation event,
-brief content, or exit code to report. The command above is the acceptance command for an
+At the time of this original local verification note, this command was **not executed** in the
+restricted Windows environment because asyncio loopback initialization failed before `run_plan`
+started. The later CI execution and its actual run ID/artifacts are recorded below. The command
+above is the acceptance command for an
 unrestricted environment.
 
 When it succeeds, the explicit brief path is under `data/fods/briefs/`; context snapshots are
@@ -110,7 +118,7 @@ root; they are not results from the unexecuted fixture brief run. To replace the
 in a normal workspace requires the explicit `--force` option. Back up the old snapshot before
 doing that. Follow-up queries never rebuild automatically.
 
-## Verification
+## Historical local verification (before CI acceptance)
 
 Checks executed in this pass:
 
@@ -127,7 +135,10 @@ Prior selected synchronous checks recorded in the preceding completion pass were
 end-to-end run. The async runtime tests, P4 graph-stage suite, and full suite are not claimed as
 passing.
 
-## Execution environment check and remaining work
+## Historical local execution environment check
+
+The following describes the environment during the original local verification pass; the later
+CI result below supersedes its statement that the fixture gate remained unrun.
 
 - At the start of the acceptance preparation there was no `.github/workflows` CI workflow. The
   acceptance workflow has since been added, but the installed GitHub CLI reports its configured
@@ -138,16 +149,18 @@ passing.
   settings were changed, and the fixture command was not repeatedly retried.
 - The saved v1 graph is inspectable but not queryable by current v2 follow-up commands until it is
   explicitly rebuilt. The isolated v2 demonstration avoided replacing it.
-- A full project demonstration still needs the exact fixture run above to execute in an
-  unrestricted Windows or supported CI environment. Its run ID, task trace, selected evidence,
-  citation validation, and brief contents must then be inspected before marking the MVP complete.
+- At that time, the exact fixture run still needed execution in an unrestricted Windows or CI
+  environment. This was subsequently completed in CI as recorded below.
 - Live-source retrieval and current Ollama/Gemini execution remain provider-dependent. Retrieval
   relevance still needs human labels, and citation validity is not a semantic-support evaluation.
 
 No provider calls or edits to the original context, enrichment corpus, or published graph snapshot
 were made. Graph demo files and measurements were written only under `.pytest-tmp/`.
 
-## CI acceptance workflow preparation (2026-11-01)
+## Historical CI acceptance workflow preparation (2026-11-01)
+
+This section records the state before the workflow was dispatched. Its final “not run” statement
+was accurate at that point only and is superseded by the following closeout.
 
 The deterministic acceptance gate is now prepared in
 `.github/workflows/fods-mvp-acceptance.yml`. It runs on manual dispatch, pull requests targeting
@@ -183,13 +196,34 @@ Supporting local checks for this preparation passed:
 
 P4 and the full test suite were not rerun in this preparation pass.
 
-The requested acceptance workflow has **not** run on CI. The configured GitHub CLI token remains
-invalid, so no dispatch was attempted; local execution remains blocked by the previously diagnosed
-Windows loopback restriction. There is therefore no CI run ID/URL, acceptance run ID, new brief,
-or P4/full-suite/Ruff/compile result for this gate. The MVP remains **PARTIALLY COMPLETE** pending
-an owner-triggered workflow run and inspection of its artifacts.
+At the time of writing this preparation snapshot, the workflow had not run and the local CLI token
+was invalid. The later successful run is recorded below.
 
 Pushing this workflow on the `codex/fods-mvp-acceptance` branch triggers the acceptance job there.
-The repository owner can also open GitHub **Actions → FODS MVP acceptance → Run workflow** and
-select that branch, or open a pull request targeting `main`. The downloadable artifact is named
+The repository owner could also open GitHub **Actions → FODS MVP acceptance → Run workflow** and
+select that branch, or open a pull request targeting `main`. The uploaded artifact is named
 `fods-mvp-acceptance`.
+
+## CI acceptance closeout (2026-11-01)
+
+The backend acceptance workflow passed on branch `codex/fods-mvp-acceptance`, commit `f533ae1`,
+in [GitHub Actions run 41296050154](https://github.com/kushalk-hub/Research_AI_Agent/actions/runs/41296050154).
+The accepted deterministic fixture run was `a358ed9efa63`: 8/8 tasks completed with zero failed
+task attempts, 4 context papers and 4 selected evidence cards; citation IDs P1, P2, and P3 mapped
+to selected evidence and passed the validator. The brief, JSONL trace, and HTML visualization
+were uploaded as the `fods-mvp-acceptance` artifact. These are CI-generated files and are not in
+the local checkout because `data/fods/` is ignored.
+
+CI results: **797 full-suite tests passed**, **28 P4 graph-stage tests passed**, Ruff passed,
+`compileall` passed, and artifact validation succeeded. This closes the backend acceptance gate.
+It does not close retrieval-quality evaluation: the paired review file has 650 observations and
+zero reviewer labels; the pooled review file has 450 observations and zero reviewer labels.
+Human-reviewed relevance metrics remain **PENDING**. Citation-ID validation is not semantic
+entailment evaluation. The proposed Chat/Trace/FODS Visualizer redesign remains deferred pending
+the human-reviewed benchmark gate.
+
+The currently implemented browser workbench still requires a reachable local loopback server.
+In this Windows environment the server startup command succeeded, but browser access at
+`127.0.0.1:18765` timed out and a PowerShell request received `WSAEACCES`; therefore local browser
+rehearsal has not been verified here. The deterministic CI artifacts and the separate local
+fixture replay remain safe presentation fallbacks.
