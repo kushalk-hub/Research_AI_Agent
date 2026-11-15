@@ -29,6 +29,8 @@ Date: 2026-11-15
 | `4bdc49a02c06` | Same long-context topic and question, after rebinding cached extractions to the current paper ID. | Reused all 5 matching extractions, resolved 14 concepts, built a graph with 5 papers and 14 concepts, and saved the answer. Status was partial due source failures. The answer described methods but correctly stated that empirical limitations were not present in the selected evidence. |
 | `08d0cfe37fd3` | **AI for materials discovery.** “Which approaches combine machine learning with automated experiments to discover new materials, and what limits successful validation and scale-up?” | The React form exposed a 20-paper maximum and submitted `paper_limit=20`. It scored 60 candidates, selected 20, extracted 20/20, resolved 54 names to 47 concepts, built a graph with 20 paper nodes, and saved an answer. The answer supports ML approaches and a small-data limitation, while explicitly saying the selected papers do not establish how ML is integrated with automated experiments or how validation/scale-up are limited. Citations were not stripped. Several selected records were generic graph-learning papers rather than materials papers, so retrieval precision remains a concern. The run ended partial due Semantic Scholar and DBLP failures. |
 
+The full 20-paper run record and title-level relevance triage are in [qa-20-paper-run.md](qa-20-paper-run.md).
+
 ## Deterministic demo and browser check
 
 - Playwright submitted a deterministic demo on **Automated laboratory workflows** and received HTTP 202. It completed with 114 events, a visible evidence-backed answer, and no failed HTTP requests. The demo uses bundled fixtures and does not validate live retrieval quality.
