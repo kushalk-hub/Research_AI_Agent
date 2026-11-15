@@ -178,7 +178,7 @@ function ResearchPage({ workspace, selectedEvidence, setSelectedEvidence }) {
   const { config, run, events, active, start, setError, error } = workspace;
   const [topic, setTopic] = useState("");
   const [question, setQuestion] = useState("");
-  const [paperLimit, setPaperLimit] = useState(10);
+  const [paperLimit, setPaperLimit] = useState(20);
   const [waitSeconds, setWaitSeconds] = useState(300);
   const [budget, setBudget] = useState(100);
   const [engine, setEngine] = useState("rla");
@@ -205,7 +205,7 @@ function ResearchPage({ workspace, selectedEvidence, setSelectedEvidence }) {
 
   useEffect(() => {
     if (!config) return;
-    setPaperLimit(config.paper_limit || 10);
+    setPaperLimit(config.paper_limit || 20);
     setWaitSeconds(config.provider_wait_seconds ?? 300);
     setBudget(Math.max(100, config.llm_request_budget || 100));
   }, [config]);
@@ -256,7 +256,7 @@ function ResearchPage({ workspace, selectedEvidence, setSelectedEvidence }) {
           <div className="operational-note"><ShieldCheck size={17} /><span>{engine === "rla" ? "Each source and answer citation is shown with the evidence recorded for this run. Full-text retrieval is not enabled yet; extraction currently uses abstracts." : engine === "fods-demo" ? "The demo uses recorded fixture papers and a deterministic planner. It validates frontend and runtime flows without contacting literature providers." : "Live FODS uses configured literature providers and an Ollama planner. Reuse a saved context to answer a new question from the same topic data."}</span></div>
           <button className="settings-toggle" type="button" onClick={() => setShowSettings(!showSettings)}><Settings2 size={16} /> Advanced agent parameters <ChevronDown className={showSettings ? "rotate" : ""} size={15} /></button>
           {showSettings && engine === "rla" && <div className="form-grid">
-            <div><label htmlFor="paper-limit">Papers to keep</label><input id="paper-limit" type="number" min="2" max="100" value={paperLimit} onChange={(e) => setPaperLimit(e.target.value)} /></div>
+            <div><label htmlFor="paper-limit">Papers to keep</label><input id="paper-limit" type="number" min="2" max={config?.paper_limit_max || 20} value={paperLimit} onChange={(e) => setPaperLimit(e.target.value)} /></div>
             <div><label htmlFor="cooldown">Provider cooldown wait (seconds)</label><input id="cooldown" type="number" min="0" max="3600" value={waitSeconds} onChange={(e) => setWaitSeconds(e.target.value)} /></div>
             <div><label htmlFor="request-budget">Model requests for this run</label><input id="request-budget" type="number" min="1" max="1000" value={budget} onChange={(e) => setBudget(e.target.value)} /></div>
           </div>}

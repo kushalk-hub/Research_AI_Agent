@@ -40,16 +40,17 @@ def test_full_literature_pipeline_exposes_bounded_run_settings(tmp_path):
         question="How does AI change experimentation?",
         engine="rla",
         mode="live",
-        paper_limit=10,
+        paper_limit=20,
         provider_wait_seconds=300,
         llm_request_budget=100,
     )
     assert request.engine == "rla"
-    assert request.paper_limit == 10
+    assert request.paper_limit == 20
     assert request.provider_wait_seconds == 300
     assert request.llm_request_budget == 100
     assert manager.config()["provider_wait_seconds"] == 300
-    assert manager.config()["paper_limit"] == 10
+    assert manager.config()["paper_limit"] == 20
+    assert manager.config()["paper_limit_max"] == 20
 
     with pytest.raises(ValueError, match="requires live mode"):
         manager.start(request.model_copy(update={"mode": "simulate"}))
@@ -60,7 +61,7 @@ def test_full_literature_pipeline_exposes_bounded_run_settings(tmp_path):
             question="How does AI change experimentation?",
             engine="rla",
             mode="live",
-            paper_limit=101,
+            paper_limit=21,
         )
     with pytest.raises(ValidationError):
         NewRun(

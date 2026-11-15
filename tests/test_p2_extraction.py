@@ -489,3 +489,29 @@ async def test_cached_extraction_is_rebound_to_current_paper_id(tmp_path):
     assert reused.extraction_hash != old.extraction_hash
     assert llm.calls == []
     assert any(evt.payload.get("reused") == 1 for evt in events)
+
+
+@pytest.mark.asyncio
+async def test_extraction_summary_counts_only_papers_from_current_run(tmp_path):
+    current = Paper(id="current", title="Current paper", year=2024, abstract="Current text")
+    previous = Paper(id="previous", title="Previous paper", year=2023, abstract="Old text")
+    store = ExtractionStore(tmp_path / "extractions.jsonl")
+    store.add(
+        PaperFacts(
+            summary="current facts",
+            concepts=[ConceptMention(name="current concept")],
+        ).to_extraction(current)
+    )
+    store.add(
+        PaperFacts(
+            summary="historical facts",
+            concepts=[ConceptMention(name="historical concept")],
+            stated_limitation="historical limitation",
+        ).to_extraction(previous)
+    )
+
+    events = [evt async for evt in extract_papers([current], RecordingLLM(), store)]
+
+    summary = events[-1]
+    assert summary.payload["concepts"] == 1
+    assert summary.payload["limitations"] == 0

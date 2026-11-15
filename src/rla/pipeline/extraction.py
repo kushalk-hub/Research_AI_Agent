@@ -344,7 +344,12 @@ async def extract_papers(
         )
         return
 
-    stored = store.all()
+    current_keys = {(paper.id, paper.ensure_hash()) for paper in papers}
+    stored = [
+        extraction
+        for extraction in store.all()
+        if (extraction.paper_id, extraction.paper_hash) in current_keys
+    ]
     limitations = sum(1 for e in stored if e.stated_limitation)
     concepts = {c.name.lower() for e in stored for c in e.concepts}
     cost = tracker.stage_report(STAGE, model) if tracker else None

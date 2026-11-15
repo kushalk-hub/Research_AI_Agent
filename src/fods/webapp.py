@@ -30,6 +30,7 @@ from rla.config import Settings, get_settings
 WEB_ROOT = Path(__file__).with_name("web")
 RUN_ID = re.compile(r"^[0-9a-f]{12}$")
 OUTPUT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.md$")
+MAX_LIVE_PAPER_LIMIT = 20
 
 
 class NewRun(BaseModel):
@@ -51,7 +52,7 @@ class NewRun(BaseModel):
     invalid_citation: bool = False
     fail_sources: list[str] = Field(default_factory=list, max_length=5)
     delay_ms: int = Field(default=150, ge=0, le=5000)
-    paper_limit: int = Field(default=10, ge=2, le=100)
+    paper_limit: int = Field(default=MAX_LIVE_PAPER_LIMIT, ge=2, le=MAX_LIVE_PAPER_LIMIT)
     provider_wait_seconds: float = Field(default=300.0, ge=0, le=3600)
     llm_request_budget: int = Field(default=100, ge=1, le=1000)
 
@@ -139,7 +140,8 @@ class RunManager:
             "gemini_opted_in": os.getenv("RLA_FODS_ALLOW_GEMINI") == "1",
             "source_names": settings.enabled_sources(),
             "provider_wait_seconds": settings.provider_max_automatic_wait_seconds,
-            "paper_limit": max(2, min(10, settings.target_corpus_max)),
+            "paper_limit": max(2, min(MAX_LIVE_PAPER_LIMIT, settings.target_corpus_max)),
+            "paper_limit_max": MAX_LIVE_PAPER_LIMIT,
             "llm_request_budget": settings.llm_daily_budget,
             "source_quorum": 2,
             "modes": ["live", "simulate", "replay"],
