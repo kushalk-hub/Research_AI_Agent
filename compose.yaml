@@ -1,0 +1,22 @@
+services:
+  research-agent:
+    image: fods-research-agent:faculty-demo-2026-11
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_REVISION: ${APP_REVISION:-local}
+    env_file:
+      - path: ./.env
+        required: false
+    environment:
+      RLA_DATA_DIR: /app/data
+      RLA_OLLAMA_URL: ${RLA_OLLAMA_URL_DOCKER:-http://host.docker.internal:11434}
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - fods-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  fods-data:
