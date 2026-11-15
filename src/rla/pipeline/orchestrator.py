@@ -234,7 +234,7 @@ class Pipeline:
                     )
                     result.answer_result = answer_result
                     result.answer = answer_result.answer if answer_result else ""
-                    async for evt in answer_events:
+                    for evt in answer_events:
                         yield evt
 
         stats: dict[str, Any] = {"cache": self.cache.stats() if self.cache else None}
@@ -254,8 +254,8 @@ class Pipeline:
         from rla.pipeline.graph_build import build_graph_stage
         from rla.store.extraction_store import ExtractionStore
 
-        extractions = ExtractionStore(self.settings.extractions_path).all()
         assert result.corpus is not None  # guarded by the caller
+        extractions = ExtractionStore(self.settings.extractions_path).for_corpus(result.corpus)
         async for evt in build_graph_stage(
             result.corpus,
             result.concepts,
@@ -301,7 +301,15 @@ class Pipeline:
         from rla.pipeline.resolve import resolve_concepts
         from rla.store.extraction_store import ExtractionStore
 
-        extractions = ExtractionStore(self.settings.extractions_path).all()
+        if result.corpus is None:
+            yield event(
+                Phase.RESOLVE,
+                "concept resolution needs a corpus; skipping",
+                kind="pending",
+            )
+            return
+
+        extractions = ExtractionStore(self.settings.extractions_path).for_corpus(result.corpus)
         if not extractions:
             yield event(
                 Phase.RESOLVE,

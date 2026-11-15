@@ -37,6 +37,7 @@ class NewRun(BaseModel):
 
     topic: str = Field(min_length=3, max_length=300)
     question: str = Field(min_length=3, max_length=1000)
+    engine: Literal["rla", "fods"] = "fods"
     mode: Literal["live", "simulate"] = "simulate"
     planner: Literal["auto", "ollama", "fixture"] = "auto"
     schedule: Literal["fifo", "priority"] = "fifo"
@@ -50,6 +51,9 @@ class NewRun(BaseModel):
     invalid_citation: bool = False
     fail_sources: list[str] = Field(default_factory=list, max_length=5)
     delay_ms: int = Field(default=150, ge=0, le=5000)
+    paper_limit: int = Field(default=10, ge=2, le=100)
+    provider_wait_seconds: float = Field(default=300.0, ge=0, le=3600)
+    llm_request_budget: int = Field(default=100, ge=1, le=1000)
 
     @field_validator("topic", "question")
     @classmethod
@@ -89,6 +93,7 @@ class RunHandle:
     condition: threading.Condition = field(default_factory=threading.Condition)
     cancel_event: threading.Event = field(default_factory=threading.Event)
     finished: bool = False
+    engine: str = "fods"
 
     def publish(self, event: Any) -> None:
         value = event.to_dict() if hasattr(event, "to_dict") else dict(event)
@@ -133,6 +138,9 @@ class RunManager:
             "gemini_key_configured": bool(settings.gemini_api_key),
             "gemini_opted_in": os.getenv("RLA_FODS_ALLOW_GEMINI") == "1",
             "source_names": settings.enabled_sources(),
+            "provider_wait_seconds": settings.provider_max_automatic_wait_seconds,
+            "paper_limit": max(2, min(10, settings.target_corpus_max)),
+            "llm_request_budget": settings.llm_daily_budget,
             "source_quorum": 2,
             "modes": ["live", "simulate", "replay"],
         }
@@ -147,6 +155,12 @@ class RunManager:
         return name
 
     def start(self, request: NewRun, idempotency_key: str = "") -> tuple[RunHandle, bool]:
+        if request.engine == "rla" and request.mode != "live":
+            raise ValueError("the full literature pipeline requires live mode")
+        if request.engine == "rla" and (request.reuse_context or request.fresh_sources):
+            raise ValueError(
+                "context reuse and source-cache controls are available in the FODS runtime"
+            )
         unknown = set(request.fail_sources) - set(FIXTURE_PAPERS)
         if unknown:
             raise ValueError(f"unknown demo source(s): {', '.join(sorted(unknown))}")
@@ -162,9 +176,13 @@ class RunManager:
             from fods.tools import read_context_snapshot
 
             read_context_snapshot(self.settings.data_dir, request.topic, request.context_id)
-        if request.mode == "simulate" and request.planner == "ollama":
+        if (
+            request.engine == "fods"
+            and request.mode == "simulate"
+            and request.planner == "ollama"
+        ):
             raise ValueError("deterministic simulation uses the fixture planner")
-        if request.mode == "live" and not request.reuse_context:
+        if request.engine == "fods" and request.mode == "live" and not request.reuse_context:
             if request.planner == "fixture":
                 raise ValueError("fixture planner cannot be used for live research")
             planner_model = self.settings.canonical_model(self.settings.model_for_structured)
@@ -198,6 +216,7 @@ class RunManager:
             self.briefs_dir.mkdir(parents=True, exist_ok=True)
             event_path = self.runs_dir / f"{run_id}.jsonl"
             handle = RunHandle(run_id, request.mode, request.topic, output, event_path)
+            handle.engine = request.engine
             self.runs[run_id] = handle
             if key:
                 self.idempotency[key] = run_id
@@ -213,6 +232,9 @@ class RunManager:
         return handle, False
 
     def _execute(self, handle: RunHandle, request: NewRun, event_log: EventLog) -> None:
+        if request.engine == "rla":
+            self._execute_research_pipeline(handle, request, event_log)
+            return
         from fods.cli import _execute
 
         fail_sources = set(request.fail_sources)
@@ -299,6 +321,167 @@ class RunManager:
             )
             handle.finish("failed", f"{type(exc).__name__}: {exc}")
 
+    def _execute_research_pipeline(
+        self, handle: RunHandle, request: NewRun, event_log: EventLog
+    ) -> None:
+        """Run the existing rla stages behind the same browser event stream."""
+        from rla.llm.factory import build_client
+        from rla.pipeline.answer import render_markdown
+        from rla.pipeline.orchestrator import Pipeline, PipelineResult
+        from rla.store.cache import Cache, CostTracker
+        from rla.store.rate_limits import LiveCollectionInProgress, LiveCollectionLock
+
+        settings = self.settings.model_copy(
+            update={
+                "target_corpus_min": request.paper_limit,
+                "target_corpus_max": request.paper_limit,
+                "provider_max_automatic_wait_seconds": request.provider_wait_seconds,
+                "llm_daily_budget": request.llm_request_budget,
+            }
+        )
+        settings.ensure_dirs()
+        cache = Cache(settings.cache_db)
+        tracker = CostTracker()
+        try:
+            llm = build_client(settings, cache, tracker)
+            result = PipelineResult()
+            event_log.emit(
+                "run_started",
+                "Full literature pipeline started",
+                run_id=handle.run_id,
+                engine="rla",
+                mode="live",
+                topic=request.topic,
+                question=request.question,
+                paper_limit=request.paper_limit,
+                provider_wait_seconds=request.provider_wait_seconds,
+                llm_request_budget=request.llm_request_budget,
+            )
+            with LiveCollectionLock(settings.data_dir):
+                async def run_pipeline() -> None:
+                    async for item in Pipeline(settings, llm, cache, tracker).run(
+                        request.topic, request.question, result
+                    ):
+                        value = item.to_dict()
+                        event_log.emit(
+                            "research_progress",
+                            item.message,
+                            phase=value["phase"],
+                            phase_kind=item.kind,
+                            stage_payload=item.payload,
+                            event_timestamp=item.timestamp,
+                        )
+                        if value["phase"] == "score" and result.corpus is not None:
+                            papers = [
+                                paper.model_dump(mode="json")
+                                for paper in result.corpus.papers
+                            ]
+                            event_log.emit(
+                                "research_papers",
+                                f"{len(papers)} selected papers are ready",
+                                papers=papers,
+                            )
+
+                asyncio.run(run_pipeline())
+
+            answer_result = result.answer_result
+            answer = getattr(answer_result, "answer", "") if answer_result else ""
+            graph_ok = bool(result.graph_report)
+            extracted = int(result.extraction.get("extracted", 0)) + int(
+                result.extraction.get("reused", 0)
+            )
+            paper_count = len(result.corpus.papers) if result.corpus else 0
+            complete = bool(answer and graph_ok and paper_count and extracted >= paper_count)
+            if answer_result and result.corpus:
+                from rla.pipeline.traverse import NodeType
+
+                corpus_by_id = {
+                    paper.id: paper.model_dump(mode="json")
+                    for paper in result.corpus.papers
+                }
+                evidence = []
+                for node in answer_result.subgraph.nodes if answer_result.subgraph else []:
+                    if node.type == str(NodeType.PAPER) and node.node_id in corpus_by_id:
+                        evidence.append(
+                            {"citation": node.label, "paper": corpus_by_id[node.node_id]}
+                        )
+                event_log.emit(
+                    "research_answer",
+                    "Cited answer generated",
+                    answer=answer,
+                    question_type=str(answer_result.question_type),
+                    citations=answer_result.citations_used(),
+                    stripped_citations=answer_result.stripped_citations,
+                    evidence=evidence,
+                )
+                if complete and handle.output_path:
+                    output_path = (self.workspace / handle.output_path).resolve()
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_text(render_markdown(answer_result), encoding="utf-8")
+                    event_log.emit(
+                        "brief_saved",
+                        "Cited research brief saved",
+                        path=handle.output_path,
+                        saved=True,
+                        citations_validated=True,
+                    )
+
+            source_failures = result.acquisition.get("failed_sources", {})
+            termination_reason = (
+                "completed_with_partial_sources" if complete and source_failures else
+                "completed" if complete else "pipeline_incomplete"
+            )
+            status = (
+                "partial" if complete and source_failures else "completed" if complete else "failed"
+            )
+            event_log.emit(
+                "run_finished",
+                "Research pipeline completed" if complete else "Research pipeline did not complete",
+                run_id=handle.run_id,
+                engine="rla",
+                mode="live",
+                succeeded=complete,
+                termination_reason=termination_reason,
+                elapsed_ms=None,
+                paper_count=paper_count,
+                extracted_count=extracted,
+                graph_built=graph_ok,
+                answer_ready=bool(answer),
+            )
+            handle.finish(
+                status,
+                "" if complete else "one or more required pipeline stages did not complete",
+            )
+        except LiveCollectionInProgress as exc:
+            event_log.emit(
+                "run_finished",
+                str(exc),
+                run_id=handle.run_id,
+                engine="rla",
+                mode="live",
+                succeeded=False,
+                termination_reason="already_running",
+            )
+            handle.finish("failed", str(exc))
+        except Exception as exc:
+            event_log.emit(
+                "run_failed",
+                f"run failed: {type(exc).__name__}: {str(exc)[:240]}",
+                run_id=handle.run_id,
+                engine="rla",
+                mode="live",
+            )
+            event_log.emit(
+                "run_finished",
+                "Research pipeline failed before completion",
+                run_id=handle.run_id,
+                engine="rla",
+                mode="live",
+                succeeded=False,
+                termination_reason="failed",
+            )
+            handle.finish("failed", f"{type(exc).__name__}: {exc}")
+
     def get(self, run_id: str) -> RunHandle | None:
         with self.lock:
             return self.runs.get(run_id)
@@ -333,6 +516,7 @@ class RunManager:
             result.append(
                 {
                     "run_id": path.stem,
+                    "engine": started.get("payload", {}).get("engine", "fods"),
                     "mode": started.get("payload", {}).get(
                         "mode", plan.get("payload", {}).get("mode", "unknown")
                     ),
@@ -465,7 +649,21 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
             parsed = urlparse(self.path)
             path = parsed.path
             if path == "/":
+                built_entry = WEB_ROOT / "dist" / "index.html"
+                if built_entry.is_file():
+                    return self._static("dist/index.html", "text/html; charset=utf-8")
                 return self._static("index.html", "text/html; charset=utf-8")
+            asset_match = re.fullmatch(r"/assets/([A-Za-z0-9._-]+\.(?:js|css|svg|woff2?))", path)
+            if asset_match:
+                filename = asset_match.group(1)
+                content_type = {
+                    ".js": "text/javascript; charset=utf-8",
+                    ".css": "text/css; charset=utf-8",
+                    ".svg": "image/svg+xml",
+                    ".woff": "font/woff",
+                    ".woff2": "font/woff2",
+                }[Path(filename).suffix]
+                return self._static(f"dist/assets/{filename}", content_type)
             if path == "/app.js":
                 return self._static("app.js", "text/javascript; charset=utf-8")
             if path == "/styles.css":
@@ -629,6 +827,7 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
 def _handle_info(handle: RunHandle) -> dict[str, Any]:
     return {
         "run_id": handle.run_id,
+        "engine": handle.engine,
         "run_kind": handle.run_kind,
         "source_run_id": handle.source_run_id or None,
         "topic": handle.topic,

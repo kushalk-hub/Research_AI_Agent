@@ -159,7 +159,11 @@ def build_sources(
             limiter=RateLimiter(0.0),
             max_retries=settings.max_retries,
             timeout=settings.request_timeout_seconds,
-            provider_limiter=ProviderRequestLimiter(policy, lock_dir=lock_dir),
+            provider_limiter=ProviderRequestLimiter(
+                policy,
+                lock_dir=lock_dir,
+                max_automatic_wait_seconds=settings.provider_max_automatic_wait_seconds,
+            ),
             attempt_budget=attempt_budget,
         )
 

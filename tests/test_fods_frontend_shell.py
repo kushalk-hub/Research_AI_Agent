@@ -81,21 +81,24 @@ console.log(JSON.stringify({
     assert (actual["next"], actual["previous"], actual["reset"]) == (7, 6, 0)
 
 
-def test_frontend_source_exposes_new_views_and_keeps_classic_workbench():
-    page = (ROOT / "src" / "fods" / "web" / "index.html").read_text(encoding="utf-8")
-    assert "data-view=\"chat\"" in page
-    assert "data-view=\"trace\"" in page
-    assert "data-view=\"visualizer\"" in page
-    assert "data-view=\"library\"" in page
-    assert "FODS Lab" in page
-    assert "New investigation" in page
-    assert "Fresh live research" in page
-    assert "Projected slot" not in page
-    assert "Chat</button>" not in page
-    assert "?legacy=1" in page
-    assert 'id="legacy-app"' in page
+def test_frontend_source_exposes_react_views_and_event_backed_runtime():
+    frontend = ROOT / "stitch_aesthetic_markdown_reader"
+    page = (frontend / "index.html").read_text(encoding="utf-8")
+    app = (frontend / "src" / "main.jsx").read_text(encoding="utf-8")
+    styles = (frontend / "src" / "styles.css").read_text(encoding="utf-8")
+
+    assert '<div id="root"></div>' in page
     assert 'src="/shell-core.js"' in page
-    assert 'src="/shell.js"' in page
+    assert 'src="/src/main.jsx"' in page
+    for view in ("Execution Trace", "FODS Lab", "Library"):
+        assert view in app
+    for event in ("context_ready", "evidence_selected", "answer_ready", "citation_validation"):
+        assert event in app
+    assert "reuse_context" in app
+    assert "graphLayout(tasks)" in app
+    assert "deriveSnapshot" in app
+    assert "prefers-reduced-motion" in styles
+    assert "example.org" not in app
 
 
 @pytest.mark.skipif(

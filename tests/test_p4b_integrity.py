@@ -241,6 +241,37 @@ def test_prune_leaves_a_healthy_store_untouched(tmp_path):
     assert store.path.stat().st_mtime_ns == before, "a no-op prune must not rewrite the file"
 
 
+def test_pipeline_selects_current_corpus_extractions_without_deleting_history(tmp_path):
+    import asyncio
+
+    from rla.models import Concept
+    from rla.pipeline.orchestrator import Pipeline, PipelineResult
+
+    current = make_corpus("current")
+    previous = make_corpus("previous")
+    store = fill(tmp_path, [*current.papers, *previous.papers])
+    current_extractions = store.for_corpus(current)
+
+    assert [extraction.paper_id for extraction in current_extractions] == ["current"]
+    assert len(store) == 2, "filtering a run must preserve the append-only history"
+
+    settings = _settings(tmp_path)
+    concept = Concept(id="concept:current", name="current concept", paper_ids=["current"])
+    result = PipelineResult(corpus=current, concepts=[concept])
+
+    async def build_graph_events():
+        return [
+            evt async for evt in Pipeline(settings, None, None)._run_graph(result)
+        ]
+
+    events = asyncio.run(build_graph_events())
+
+    assert result.graph is not None
+    assert result.graph.has_node("current")
+    assert not result.graph.has_node("previous")
+    assert not any(evt.payload.get("blocked") for evt in events)
+
+
 def test_the_status_command_reports_a_store_that_agrees(tmp_path, monkeypatch):
     from rla.store.graph_store import build_graph, save
 

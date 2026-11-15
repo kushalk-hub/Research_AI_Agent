@@ -192,7 +192,7 @@ class ProviderRequestLimiter:
     """Coordinate provider request starts and, where required, in-flight calls."""
 
     MAX_POLICY_INTERVAL = 300.0
-    MAX_AUTOMATIC_WAIT_SECONDS = 60.0
+    MAX_AUTOMATIC_WAIT_SECONDS = 300.0
     LOCK_POLL_SECONDS = 0.05
 
     def __init__(
@@ -200,6 +200,7 @@ class ProviderRequestLimiter:
         policy: ProviderPolicy,
         *,
         lock_dir: Path | None,
+        max_automatic_wait_seconds: float = MAX_AUTOMATIC_WAIT_SECONDS,
         clock: Callable[[], float] = time.monotonic,
         sleeper: Callable[[float], Any] = asyncio.sleep,
     ) -> None:
@@ -207,8 +208,11 @@ class ProviderRequestLimiter:
             raise ValueError("provider minimum interval must be between 0 and 300 seconds")
         if policy.max_in_flight is not None and not 1 <= policy.max_in_flight <= 16:
             raise ValueError("provider max_in_flight must be between 1 and 16")
+        if not 0 <= max_automatic_wait_seconds <= 3600:
+            raise ValueError("maximum automatic wait must be between 0 and 3600 seconds")
         self.policy = policy
         self.lock_dir = lock_dir
+        self.max_automatic_wait_seconds = max_automatic_wait_seconds
         self.clock = clock
         self.sleeper = sleeper
         self._lock = asyncio.Lock()
@@ -346,10 +350,10 @@ class ProviderRequestLimiter:
             )
             cooldown_wait = max(0.0, not_before - now)
             scheduled_delay = max(interval_wait, cooldown_wait)
-            if scheduled_delay > self.MAX_AUTOMATIC_WAIT_SECONDS:
+            if scheduled_delay > self.max_automatic_wait_seconds:
                 raise RateLimitDeadlineExceeded(
                     f"{self.policy.provider} cooldown exceeds the bounded "
-                    f"{self.MAX_AUTOMATIC_WAIT_SECONDS:g}s automatic wait"
+                    f"{self.max_automatic_wait_seconds:g}s automatic wait"
                 )
             if deadline is not None and now + scheduled_delay >= deadline:
                 raise RateLimitDeadlineExceeded(

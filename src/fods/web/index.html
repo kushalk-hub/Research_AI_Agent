@@ -56,20 +56,24 @@
                 <label for="shell-topic">Topic <span class="shell-muted">optional</span></label>
                 <input id="shell-topic" name="topic" minlength="3" maxlength="300" placeholder="Use a short topic label or leave blank" />
                 <div class="shell-form-grid shell-primary-settings">
-                  <div><label for="shell-mode">Research mode</label><select id="shell-mode" name="mode"><option value="live" selected>Fresh live research</option><option value="simulate">Deterministic simulation</option></select></div>
+                  <div><label for="shell-engine">Research engine</label><select id="shell-engine" name="engine"><option value="rla" selected>Full literature pipeline</option><option value="fods">FODS runtime demo</option></select></div>
+                  <div><label for="shell-mode">Research mode</label><select id="shell-mode" name="mode"><option value="live" selected>Live research</option><option value="simulate">Deterministic simulation</option></select></div>
                   <div class="shell-context-row"><label><input id="shell-reuse-context" type="checkbox" /> Reuse saved context</label><select id="shell-context"><option value="">Choose topic context</option></select></div>
                 </div>
                 <details class="shell-advanced"><summary>Advanced execution settings</summary>
                   <div class="shell-form-grid">
-                    <div><label for="shell-planner">Planner</label><select id="shell-planner" name="planner"><option value="auto" selected>Configured planner</option><option value="ollama">Ollama</option><option value="fixture">Fixture planner (simulation only)</option></select></div>
-                    <div><label for="shell-schedule">Scheduler</label><select id="shell-schedule" name="schedule"><option value="fifo">FIFO</option><option value="priority">Priority</option></select></div>
-                    <div><label for="shell-concurrency">Concurrency limit</label><input id="shell-concurrency" type="number" min="1" max="8" value="3" /></div>
-                    <div><label for="shell-source-limit">Source limit</label><input id="shell-source-limit" type="number" min="2" max="5" value="3" /></div>
+                    <div id="shell-paper-limit-field"><label for="shell-paper-limit">Papers to keep</label><input id="shell-paper-limit" type="number" min="2" max="100" value="10" /></div>
+                    <div id="shell-provider-wait-field"><label for="shell-provider-wait">Maximum provider cooldown wait (seconds)</label><input id="shell-provider-wait" type="number" min="0" max="3600" value="300" /></div>
+                    <div id="shell-llm-budget-field"><label for="shell-llm-budget">Model requests allowed this run</label><input id="shell-llm-budget" type="number" min="1" max="1000" value="100" /></div>
+                    <div id="shell-planner-field"><label for="shell-planner">Planner</label><select id="shell-planner" name="planner"><option value="auto" selected>Configured planner</option><option value="ollama">Ollama</option><option value="fixture">Fixture planner (simulation only)</option></select></div>
+                    <div id="shell-schedule-field"><label for="shell-schedule">Scheduler</label><select id="shell-schedule" name="schedule"><option value="fifo">FIFO</option><option value="priority">Priority</option></select></div>
+                    <div id="shell-concurrency-field"><label for="shell-concurrency">Concurrency limit</label><input id="shell-concurrency" type="number" min="1" max="8" value="3" /></div>
+                    <div id="shell-source-limit-field"><label for="shell-source-limit">Source limit</label><input id="shell-source-limit" type="number" min="2" max="5" value="3" /></div>
                     <div><label for="shell-output-name">Brief filename</label><input id="shell-output-name" maxlength="80" placeholder="optional-run-name.md" /></div>
                   </div>
-                  <label class="shell-fresh-row"><input id="shell-fresh-sources" type="checkbox" /> Bypass the source cache for this run</label>
+                  <label id="shell-fresh-row" class="shell-fresh-row"><input id="shell-fresh-sources" type="checkbox" /> Bypass the source cache for this run</label>
                 </details>
-                <p id="shell-mode-note" class="shell-note">Live research uses configured providers and academic sources. Provider failures are shown in the run trace.</p>
+                <p id="shell-mode-note" class="shell-note">The full literature pipeline searches configured academic sources, extracts papers, builds a graph, and answers from it.</p>
                 <button id="shell-submit" class="shell-primary" type="submit">Start investigation</button>
                 <p id="shell-error" class="shell-error" role="alert"></p>
               </form>

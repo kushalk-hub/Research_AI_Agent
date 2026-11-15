@@ -33,6 +33,45 @@ def test_run_request_rejects_blank_input_and_unbounded_settings():
         NewRun(topic="Graph attention", question="A valid question", context_id="bad-id")
 
 
+def test_full_literature_pipeline_exposes_bounded_run_settings(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    request = NewRun(
+        topic="Scientific discovery",
+        question="How does AI change experimentation?",
+        engine="rla",
+        mode="live",
+        paper_limit=10,
+        provider_wait_seconds=300,
+        llm_request_budget=100,
+    )
+    assert request.engine == "rla"
+    assert request.paper_limit == 10
+    assert request.provider_wait_seconds == 300
+    assert request.llm_request_budget == 100
+    assert manager.config()["provider_wait_seconds"] == 300
+    assert manager.config()["paper_limit"] == 10
+
+    with pytest.raises(ValueError, match="requires live mode"):
+        manager.start(request.model_copy(update={"mode": "simulate"}))
+
+    with pytest.raises(ValidationError):
+        NewRun(
+            topic="Scientific discovery",
+            question="How does AI change experimentation?",
+            engine="rla",
+            mode="live",
+            paper_limit=101,
+        )
+    with pytest.raises(ValidationError):
+        NewRun(
+            topic="Scientific discovery",
+            question="How does AI change experimentation?",
+            engine="rla",
+            mode="live",
+            llm_request_budget=1001,
+        )
+
+
 def test_live_web_run_rejects_fixture_planner_instead_of_presenting_it_as_live(tmp_path):
     manager = RunManager(_settings(tmp_path))
 
@@ -160,7 +199,23 @@ def test_event_log_redacts_credentials_from_persisted_payloads(tmp_path):
     assert "[REDACTED]" in saved
 
 
-def test_api_serves_frontend_and_never_returns_credentials(tmp_path):
+def test_api_serves_react_bundle_assets_and_never_returns_credentials(tmp_path, monkeypatch):
+    web_root = tmp_path / "web"
+    assets = web_root / "dist" / "assets"
+    assets.mkdir(parents=True)
+    (web_root / "dist" / "index.html").write_text(
+        '<!doctype html><title>FODS · Research Studio</title>'
+        '<script src="/shell-core.js" defer></script>'
+        '<script type="module" src="/assets/index-test.js"></script>'
+        '<link rel="stylesheet" href="/assets/index-test.css">',
+        encoding="utf-8",
+    )
+    (assets / "index-test.js").write_text(
+        "createRoot(document.getElementById('root'))", encoding="utf-8"
+    )
+    (assets / "index-test.css").write_text(".app-frame{min-height:100vh}", encoding="utf-8")
+    (web_root / "shell-core.js").write_text("window.FODSFrontendCore = {};", encoding="utf-8")
+    monkeypatch.setattr("fods.webapp.WEB_ROOT", web_root)
     server, _manager = make_server("127.0.0.1", 0, RunManager(_settings(tmp_path)))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -170,22 +225,20 @@ def test_api_serves_frontend_and_never_returns_credentials(tmp_path):
             page = response.read().decode()
         with urlopen(base + "/api/config", timeout=3) as response:
             config = response.read().decode()
-        with urlopen(base + "/shell.js", timeout=3) as response:
-            shell = response.read().decode()
+        with urlopen(base + "/assets/index-test.js", timeout=3) as response:
+            script = response.read().decode()
+            script_type = response.headers.get("Content-Type")
+        with urlopen(base + "/assets/index-test.css", timeout=3) as response:
+            styles = response.read().decode()
         with urlopen(base + "/shell-core.js", timeout=3) as response:
             core = response.read().decode()
-        with urlopen(base + "/vendor/d3-path-3.1.0.min.js", timeout=3) as response:
-            d3_path = response.read().decode()
-        with urlopen(base + "/vendor/d3-shape-3.2.0.min.js", timeout=3) as response:
-            d3_shape = response.read().decode()
-        assert "FODS Research Agent" in page
-        assert 'data-view="chat"' in page
-        assert "?legacy=1" in page
-        assert "EventSource" in shell
-        assert "deriveSnapshot" in core
-        assert "d3-shape" in page
-        assert d3_path.startswith("// https://d3js.org/d3-path/ v3.1.0")
-        assert d3_shape.startswith("// https://d3js.org/d3-shape/ v3.2.0")
+        assert "FODS · Research Studio" in page
+        assert "/assets/index-test.js" in page
+        assert "/assets/index-test.css" in page
+        assert "createRoot" in script
+        assert script_type.startswith("text/javascript")
+        assert ".app-frame" in styles
+        assert "FODSFrontendCore" in core
         assert "private-test-secret" not in config
         assert '"gemini_key_configured": true' in config
     finally:

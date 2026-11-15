@@ -107,19 +107,28 @@ intentional rebuild; follow-up never rebuilds it automatically.
 
 ## FODS browser visualizer
 
-Start the local interactive interface from the repository root:
+Build the React frontend once after installing or changing its dependencies:
+
+```powershell
+Set-Location stitch_aesthetic_markdown_reader
+npm install
+npm run build
+Set-Location ..
+```
+
+Then start the local interface from the repository root:
 
 ```powershell
 .\.venv\Scripts\python.exe -m fods.cli serve --host 127.0.0.1 --port 8765
 ```
 
-Then open <http://127.0.0.1:8765/>. The interface provides Overview, Execution, FODS Lab,
-Evidence & Answer, and Runs & Replay views. Deterministic simulation uses fixture papers and
-does not call Gemini. For live runs, select live mode; provider credentials remain in the Python
-process. Gemini answers require a configured key and the explicit `RLA_FODS_ALLOW_GEMINI=1`
-opt-in before starting the server. Replay reads saved events without invoking models or sources.
-The server binds to loopback by default and writes briefs only under `data/fods/briefs/` using a
-new filename.
+Open <http://127.0.0.1:8765/>. The server serves the built React app and its same-origin research
+API. For frontend-only iteration, run `npm run dev` in `stitch_aesthetic_markdown_reader`; Vite
+proxies API calls to port 8765. Deterministic simulation uses fixture papers and does not call
+Gemini. Live literature mode runs the full `rla` acquisition, extraction, graph, traversal, and
+answer stages; configure the Ollama and Gemini models shown by `rla doctor --llm`. Provider
+credentials stay in the Python process. Replay reads saved events without invoking models or
+sources. The server binds to loopback by default and writes briefs under `data/fods/briefs/`.
 
 ---
 

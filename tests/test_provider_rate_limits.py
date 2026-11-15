@@ -178,6 +178,27 @@ async def test_required_cooldown_beyond_workflow_deadline_stops_without_request(
         raise AssertionError("deadline overrun must stop the provider attempt")
 
 
+async def test_configured_automatic_wait_allows_longer_provider_cooldown() -> None:
+    clock = FakeClock()
+
+    async def advance(delay: float) -> None:
+        clock.value += delay
+
+    limiter = ProviderRequestLimiter(
+        provider_policy("arxiv"),
+        lock_dir=None,
+        max_automatic_wait_seconds=180,
+        clock=clock.now,
+        sleeper=advance,
+    )
+    limiter.defer_for(120)
+
+    async with limiter.request("search", 1) as permit:
+        assert permit.scheduled_delay == 120
+
+    assert clock.now() == 120
+
+
 async def test_independent_providers_do_not_share_a_global_lock() -> None:
     clock = FakeClock()
     arxiv = ProviderRequestLimiter(

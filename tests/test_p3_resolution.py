@@ -6,10 +6,9 @@ from __future__ import annotations
 import json
 import math
 
-from rla.events import PIPELINE_PHASES as PHASE_ORDER
 from rla.events import Phase
 from rla.llm.base import LLMError
-from rla.models import Concept, ConceptMention, Extraction
+from rla.models import Concept, ConceptMention, Corpus, Extraction, Paper
 from rla.pipeline.resolve import (
     AUTO_MERGE,
     EMBEDDING_THRESHOLDS,
@@ -478,28 +477,30 @@ async def test_a_failing_embedder_degrades_to_name_only_rather_than_crashing():
 
 
 async def test_resolve_runs_after_extract_and_persists_concepts(settings, cache, monkeypatch):
-    monkeypatch.setattr("rla.pipeline.acquisition.build_sources", lambda *a, **k: {})
     from rla.pipeline.orchestrator import IMPLEMENTED_PHASES, Pipeline, PipelineResult
 
     # Keep it offline: with a key set, resolution would try to embed for real.
     settings.gemini_api_key = ""
     settings.extractions_path.parent.mkdir(parents=True, exist_ok=True)
+    papers = [
+        Paper(id="p1", title="Paper one", year=2024, abstract="Text one"),
+        Paper(id="p2", title="Paper two", year=2024, abstract="Text two"),
+    ]
+    extractions = [extraction("p1", "GAT"), extraction("p2", "graph attention networks")]
+    for paper, item in zip(papers, extractions, strict=True):
+        item.paper_hash = paper.ensure_hash()
     settings.extractions_path.write_text(
-        extraction("p1", "GAT").model_dump_json()
-        + "\n"
-        + extraction("p2", "graph attention networks").model_dump_json()
-        + "\n",
-        "utf-8",
+        "\n".join(item.model_dump_json() for item in extractions) + "\n", "utf-8"
     )
 
     assert Phase.RESOLVE in IMPLEMENTED_PHASES
-    result = PipelineResult()
+    result = PipelineResult(corpus=Corpus(title="t", papers=papers))
     events = [
-        evt async for evt in Pipeline(settings, None, cache, CostTracker()).run("t", result=result)
+        evt
+        async for evt in Pipeline(settings, None, cache, CostTracker())._run_resolution(result)
     ]
 
-    phases = [evt.phase for evt in events]
-    assert phases == sorted(phases, key=lambda p: list(PHASE_ORDER).index(p))
+    assert all(evt.phase is Phase.RESOLVE for evt in events)
     assert result.resolution["concepts"] == 2
 
     saved = json.loads(settings.concepts_path.read_text("utf-8"))

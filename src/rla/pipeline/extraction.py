@@ -223,8 +223,18 @@ async def extract_papers(
 
     todo: list[Paper] = []
     for paper in papers:
-        cached = store.get(paper.ensure_hash())
+        paper_hash = paper.ensure_hash()
+        cached = store.get(paper_hash)
         if cached is not None:
+            if cached.paper_id != paper.id:
+                # Content hashes allow safe reuse across provider IDs, but the
+                # stored extraction must describe this corpus's paper ID so
+                # reconciliation and graph edges remain correctly anchored.
+                cached = cached.model_copy(
+                    update={"paper_id": paper.id, "extraction_hash": ""}
+                )
+                cached.ensure_hash()
+                store.add(cached)
             report.reused += 1
             continue
         todo.append(paper)

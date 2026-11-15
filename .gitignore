@@ -15,6 +15,7 @@ __pycache__/
 venv/
 .pytest_cache/
 .ruff_cache/
+node_modules/
 *.egg-info/
 dist/
 build/

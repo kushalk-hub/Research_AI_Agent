@@ -470,3 +470,22 @@ async def test_extraction_is_not_repeated_on_a_second_pipeline_run(settings, cac
 
     assert len(second.calls) == 1  # expansion only; extraction came from the store
     assert any(e.payload.get("reused") == 1 for e in events)
+
+
+@pytest.mark.asyncio
+async def test_cached_extraction_is_rebound_to_current_paper_id(tmp_path):
+    original = Paper(id="provider-a:42", title="Same paper", year=2024, abstract="Same abstract")
+    current = Paper(id="provider-b:42", title="Same paper", year=2024, abstract="Same abstract")
+    store = ExtractionStore(tmp_path / "extractions.jsonl")
+    old = PaperFacts(summary="cached facts").to_extraction(original)
+    store.add(old)
+
+    llm = RecordingLLM()
+    events = [evt async for evt in extract_papers([current], llm, store)]
+
+    reused = store.get(current.ensure_hash())
+    assert reused is not None
+    assert reused.paper_id == current.id
+    assert reused.extraction_hash != old.extraction_hash
+    assert llm.calls == []
+    assert any(evt.payload.get("reused") == 1 for evt in events)

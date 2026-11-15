@@ -62,6 +62,20 @@ class ExtractionStore:
     def all(self) -> list[Extraction]:
         return list(self._by_hash.values())
 
+    def for_corpus(self, corpus: Corpus) -> list[Extraction]:
+        """Return only extractions matching papers and content in ``corpus``.
+
+        The JSONL file is an append-only cache across runs and topics. Historical
+        entries remain useful for resume, but resolution and graph construction
+        must operate on the current corpus only.
+        """
+        current_hashes = {paper.id: paper.ensure_hash() for paper in corpus.papers}
+        return [
+            extraction
+            for extraction in self.all()
+            if current_hashes.get(extraction.paper_id) == extraction.paper_hash
+        ]
+
     def __len__(self) -> int:
         return len(self._by_hash)
 

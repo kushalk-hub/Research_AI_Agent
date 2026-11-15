@@ -189,6 +189,9 @@ class Settings(BaseSettings):
     target_corpus_min: int = 40
     target_corpus_max: int = 100
     request_timeout_seconds: float = 30.0
+    #: Maximum time an outbound request may wait for a provider-advertised
+    #: cooldown. This is separate from the HTTP request timeout.
+    provider_max_automatic_wait_seconds: float = Field(default=300.0, ge=0.0, le=3600.0)
     max_retries: int = 4
     log_level: str = "INFO"
 

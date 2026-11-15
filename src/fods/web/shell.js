@@ -47,7 +47,7 @@
   }
 
   function displayMode(run) {
-    return core.executionLabel(run);
+    return run?.engine === "rla" ? "FULL LITERATURE PIPELINE" : core.executionLabel(run);
   }
 
   function setConnection(message, ok = false) {
@@ -73,7 +73,11 @@
     $("#shell-refresh-history").addEventListener("click", loadHistory);
     $("#shell-library-refresh").addEventListener("click", loadInitialData);
     $("#shell-run-form").addEventListener("submit", submitRun);
+    $("#shell-engine").addEventListener("change", renderModeNote);
     $("#shell-mode").addEventListener("change", renderModeNote);
+    $("#shell-paper-limit").addEventListener("input", renderModeNote);
+    $("#shell-provider-wait").addEventListener("input", renderModeNote);
+    $("#shell-llm-budget").addEventListener("input", renderModeNote);
     $("#shell-fresh-sources").addEventListener("change", renderModeNote);
     $("#shell-reuse-context").addEventListener("change", renderContextControl);
     $("#shell-context").addEventListener("change", selectContext);
@@ -103,8 +107,12 @@
       ]);
       state.contexts = contexts.contexts || [];
       state.config = config;
+      if (Number.isFinite(Number(config.paper_limit))) $("#shell-paper-limit").value = String(config.paper_limit);
+      if (Number.isFinite(Number(config.provider_wait_seconds))) $("#shell-provider-wait").value = String(config.provider_wait_seconds);
+      if (Number.isFinite(Number(config.llm_request_budget))) $("#shell-llm-budget").value = String(Math.max(100, Number(config.llm_request_budget)));
       renderContexts();
       renderProviderReadiness();
+      renderModeNote();
       await loadHistory();
       setConnection(health.ok ? "Runtime connected" : "Runtime unavailable", Boolean(health.ok));
     } catch (error) {
@@ -226,14 +234,23 @@
   }
 
   function renderModeNote() {
+    const rla = $("#shell-engine").value === "rla";
     const live = $("#shell-mode").value === "live";
-    $("#shell-mode-note").textContent = live
-      ? "Live research uses the configured planner and academic sources. Provider failures are shown in the run trace."
-      : "Simulation uses deterministic fixture papers and answer drafting. No fresh academic retrieval or model call is made.";
+    $("#shell-mode").disabled = rla;
+    if (rla) $("#shell-mode").value = "live";
+    for (const selector of ["#shell-paper-limit-field", "#shell-provider-wait-field", "#shell-llm-budget-field"]) $(selector).hidden = !rla;
+    for (const selector of ["#shell-planner-field", "#shell-schedule-field", "#shell-concurrency-field", "#shell-source-limit-field", "#shell-fresh-row"]) $(selector).hidden = rla;
+    $("#shell-reuse-context").disabled = rla;
+    $("#shell-context").disabled = rla || !$("#shell-reuse-context").checked;
+    $("#shell-mode-note").textContent = rla
+      ? `Full literature pipeline · up to ${$("#shell-paper-limit").value} papers · up to ${$("#shell-llm-budget").value} model requests · provider cooldown wait up to ${$("#shell-provider-wait").value} seconds. It runs search, extraction, graph building, and answer generation.`
+      : live
+        ? "FODS runtime executes its validated task plan against configured providers. Provider failures are shown in the run trace."
+        : "Simulation uses deterministic fixture papers and answer drafting. No fresh academic retrieval or model call is made.";
     const banner = $("#shell-data-banner");
-    banner.hidden = live;
-    banner.textContent = live ? "" : "SIMULATION · Fixture papers are not real research results.";
-    if (live && $("#shell-fresh-sources").checked) {
+    banner.hidden = live || rla;
+    banner.textContent = live || rla ? "" : "SIMULATION · Fixture papers are not real research results.";
+    if (!rla && live && $("#shell-fresh-sources").checked) {
       $("#shell-mode-note").textContent = "Fresh live research bypasses the source cache. Configured providers and academic sources are required; failures remain visible.";
     }
   }
@@ -244,6 +261,7 @@
     const payload = {
       topic: $("#shell-topic").value.trim() || $("#shell-question").value.trim().slice(0, 90),
       question: $("#shell-question").value.trim(),
+      engine: $("#shell-engine").value,
       mode: $("#shell-mode").value,
       planner: $("#shell-planner").value,
       schedule: $("#shell-schedule").value,
@@ -253,6 +271,9 @@
       reuse_context: $("#shell-reuse-context").checked,
       context_id: $("#shell-reuse-context").checked ? $("#shell-context").value : "",
       fresh_sources: $("#shell-fresh-sources").checked,
+      paper_limit: Number($("#shell-paper-limit").value),
+      provider_wait_seconds: Number($("#shell-provider-wait").value),
+      llm_request_budget: Number($("#shell-llm-budget").value),
     };
     try {
       await startRun(payload);
@@ -283,7 +304,7 @@
       $("#shell-submit").disabled = false;
       throw error;
     }
-    const run = { ...handle, mode: payload.mode, run_kind: payload.mode, events: [], title: payload.topic };
+    const run = { ...handle, engine: payload.engine, mode: payload.mode, run_kind: payload.mode, events: [], title: payload.topic, question: payload.question };
     state.runs.set(run.run_id, run);
     state.currentRunId = run.run_id;
     state.cursor = 0;
@@ -320,7 +341,7 @@
   }
 
   function finishRun(run, event) {
-    run.status = run.run_kind === "replay" ? "replayed" : event.payload?.succeeded ? "completed" : "failed";
+    run.status = run.run_kind === "replay" ? "replayed" : event.payload?.termination_reason === "completed_with_partial_sources" ? "partial" : event.payload?.succeeded ? "completed" : "failed";
     if (state.currentRunId === run.run_id) {
       state.active = false;
       $("#shell-submit").disabled = false;
@@ -415,7 +436,14 @@
   function renderPlan(data) {
     const target = $("#shell-plan-tasks");
     target.replaceChildren();
-    if (!data.tasks.length) return appendText(target, "p", "shell-muted", "The runtime plan will appear here.");
+    if (!data.tasks.length) {
+      const run = currentRun();
+      if (run?.engine === "rla") {
+        $("#shell-plan-summary").textContent = "Standard literature pipeline";
+        return appendText(target, "p", "shell-muted", "Search → score → extract → resolve → graph → traverse → answer");
+      }
+      return appendText(target, "p", "shell-muted", "The runtime plan will appear here.");
+    }
     $("#shell-plan-summary").textContent = `${data.tasks.length} tasks · ${data.events.find((event) => event.kind === "plan_validated")?.payload?.levels?.length || "—"} dependency levels`;
     for (const task of data.tasks) {
       const row = document.createElement("div");
@@ -447,6 +475,35 @@
       return;
     }
     const tasks = data.tasks;
+    if (run.engine === "rla") {
+      renderRlaProgress(run, data.events);
+      const answer = [...data.events].reverse().find((event) => event.kind === "research_answer");
+      const answerNode = $("#shell-answer");
+      answerNode.replaceChildren();
+      if (answer?.payload?.answer) renderAnswer(answerNode, answer.payload.answer, answer.payload.evidence || []);
+      else appendText(answerNode, "p", "shell-muted", "The answer appears after retrieval, extraction, graph construction, and traversal.");
+      $("#shell-answer-model").textContent = state.config?.models?.answer ? `Configured answer model · ${state.config.models.answer}` : "Configured answer model";
+      const questionNode = $("#shell-run-question");
+      questionNode.textContent = run.question || "Question not recorded in this run.";
+      questionNode.hidden = false;
+      $("#shell-citation-status").textContent = answer
+        ? `Citation check complete · ${answer.payload.citations?.length || 0} citation(s) retained; unsupported IDs stripped: ${answer.payload.stripped_citations?.length || 0}.`
+        : "Citations are checked against the traversed graph when the answer is generated.";
+      const papers = [...data.events].reverse().find((event) => event.kind === "research_papers")?.payload?.papers || [];
+      renderEvidence(answer?.payload?.evidence || [], papers);
+      const saved = [...data.events].reverse().find((event) => event.kind === "brief_saved");
+      const linkTarget = $("#shell-brief-link");
+      linkTarget.replaceChildren();
+      if (saved?.payload?.saved) {
+        const link = document.createElement("a");
+        link.href = `/api/runs/${run.run_id}/brief`;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = "Open cited research brief";
+        linkTarget.append(link);
+      }
+      return;
+    }
     const questionEvent = data.events.find((event) => event.kind === "plan_received");
     const runQuestion = $("#shell-run-question");
     runQuestion.textContent = questionEvent?.payload?.question || "Question not recorded in this run.";
@@ -505,15 +562,46 @@
     target.append(document.createTextNode(text.slice(previous)));
   }
 
-  function renderEvidence(evidence) {
+  function renderRlaProgress(run, events) {
+    const target = $("#shell-progress");
+    const updates = events.filter((event) => event.kind === "research_progress");
+    target.replaceChildren();
+    const byPhase = new Map();
+    for (const event of updates) {
+      const phase = event.payload?.phase || "pipeline";
+      byPhase.set(phase, event);
+    }
+    const labels = ["search", "fetch", "score", "fulltext", "extract", "resolve", "graph", "traverse", "answer"];
+    const finished = [...byPhase.values()].filter((event) => ["ok", "warn", "error", "pending"].includes(event.payload?.phase_kind)).length;
+    $("#shell-progress-summary").textContent = `${finished}/${labels.length} stages reported · ${run.status === "starting" ? "starting" : run.status}`;
+    for (const phase of labels) {
+      const event = byPhase.get(phase);
+      const row = document.createElement("div");
+      row.className = "shell-progress-row";
+      const kind = event?.payload?.phase_kind || "planned";
+      appendText(row, "code", "", phase);
+      appendText(row, "span", `shell-state ${kind}`, kind);
+      appendText(row, "small", "", event?.message || "Waiting for this stage");
+      target.append(row);
+    }
+  }
+
+  function renderEvidence(evidence, papers = []) {
     const target = $("#shell-evidence-cards");
     target.replaceChildren();
-    for (const item of evidence) {
+    const citationById = new Map(evidence.map((item) => [item.paper?.id, item.citation]));
+    const current = currentRun();
+    const records = current?.engine === "rla" ? papers.map((paper) => ({
+      citation: citationById.get(paper.id) || "",
+      paper,
+      excerpt: paper.abstract || "No abstract available.",
+    })) : evidence;
+    for (const item of records) {
       const paper = item.paper || {};
       const card = document.createElement("article");
       card.className = `shell-evidence-card ${state.selectedCitation === item.citation ? "selected" : ""}`;
-      card.id = `shell-evidence-${escapeSelector(item.citation)}`;
-      appendText(card, "span", "shell-evidence-id", `[${item.citation}] · ${paper.id || "paper id unavailable"}`);
+      if (item.citation) card.id = `shell-evidence-${escapeSelector(item.citation)}`;
+      appendText(card, "span", "shell-evidence-id", `${item.citation ? `[${item.citation}] · ` : ""}${paper.id || "paper id unavailable"}`);
       appendText(card, "h3", "", paper.title || "Untitled paper");
       appendText(card, "p", "", item.excerpt || item.text || paper.abstract || "No excerpt recorded in this evidence card.");
       if (paper.doi) {
