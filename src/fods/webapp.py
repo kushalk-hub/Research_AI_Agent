@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from fods.event_meta import PHASE_LABEL
 from fods.events import EventLog, read_events
 from fods.fixtures import FIXTURE_PAPERS
-from fods.safety import redact_text, safe_value
+from fods.safety import redact_text, safe_value, sanitise_paths
 from fods.visualize import write_run_html
 from rla.config import Settings, get_settings
 from rla.events import PIPELINE_PHASES
@@ -33,6 +33,12 @@ WEB_ROOT = Path(__file__).with_name("web")
 RUN_ID = re.compile(r"^[0-9a-f]{12}$")
 OUTPUT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.md$")
 MAX_LIVE_PAPER_LIMIT = 20
+#: A generated brief is small; anything larger is not something we wrote (A-08).
+MAX_BRIEF_BYTES = 2 * 1024 * 1024
+#: Finished runs stay in memory for recent polling; older ones are served from
+#: disk (A-02), so the ring can stay small.
+MAX_FINISHED_HANDLES = 24
+STREAM_RETRY_MS = 3000
 
 
 class NewRun(BaseModel):
@@ -156,6 +162,20 @@ class RunManager:
         self.runs: dict[str, RunHandle] = {}
         self.idempotency: dict[str, str] = {}
         self.lock = threading.RLock()
+        # A-09: history entries are parsed once per (path, mtime, size).
+        self._history_cache: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
+
+    def paths_roots(self) -> tuple[str, ...]:
+        """Widest first: the workspace, then the data dir, then the cwd."""
+        roots = [str(self.workspace), str(self.root)]
+        cwd = str(Path.cwd())
+        if cwd not in roots:
+            roots.append(cwd)
+        return tuple(roots)
+
+    def sanitise(self, value: Any) -> Any:
+        """Strip workspace-absolute paths from anything that leaves the server."""
+        return sanitise_paths(value, self.paths_roots())
 
     def config(self) -> dict[str, Any]:
         settings = self.settings
@@ -285,6 +305,7 @@ class RunManager:
         request = request.model_copy(update={"llm_request_budget": self._effective_budget(request)})
         key = idempotency_key.strip()[:120]
         with self.lock:
+            self._evict_finished()
             if key and key in self.idempotency:
                 existing = self.runs.get(self.idempotency[key])
                 if existing:
@@ -306,7 +327,7 @@ class RunManager:
             if key:
                 self.idempotency[key] = run_id
 
-        event_log = EventLog(event_path, handle.publish)
+        event_log = EventLog(event_path, handle.publish, roots=self.paths_roots())
         thread = threading.Thread(
             target=self._execute,
             args=(handle, request, event_log),
@@ -509,9 +530,9 @@ class RunManager:
                     event_log.emit(
                         "brief_saved",
                         "Cited research brief saved",
-                        path=handle.output_path,
-                        saved=True,
-                        citations_validated=True,
+                        **_brief_saved_payload(
+                            handle.output_path, answer_result.stripped_citations
+                        ),
                     )
 
             source_failures = result.acquisition.get("failed_sources", {})
@@ -579,54 +600,129 @@ class RunManager:
         with self.lock:
             return self.runs.get(run_id)
 
+    def info(self, run_id: str) -> dict[str, Any] | None:
+        """Run info for a live handle, or for a log left by an earlier process."""
+        handle = self.get(run_id)
+        if handle is not None:
+            return _handle_info(handle)
+        return self._info_from_disk(run_id)
+
+    def _info_from_disk(self, run_id: str) -> dict[str, Any] | None:
+        """A-02: after a restart the JSONL is still the authoritative record."""
+        if not RUN_ID.fullmatch(run_id):
+            return None
+        path = self.runs_dir / f"{run_id}.jsonl"
+        if not path.is_file() or not path.resolve().is_relative_to(self.runs_dir.resolve()):
+            return None
+        try:
+            events, skipped = read_events(path, strict=False)
+        except OSError:
+            return None
+        if not events:
+            return None
+        started = _first_event(events, "run_started") or {}
+        finish = _last_event(events, "run_finished") or {}
+        saved = _first_event(events, "brief_saved") or {}
+        payload = started.get("payload", {})
+        view = RunHandle(
+            run_id,
+            str(payload.get("mode") or "unknown"),
+            str(payload.get("topic") or ""),
+            str(saved.get("payload", {}).get("path") or ""),
+        )
+        view.engine = str(payload.get("engine") or "fods")
+        view.status = _status_from_finish(finish) if finish else "interrupted"
+        view.events = events
+        info = self.sanitise(_handle_info(view))
+        info["historical"] = True
+        info["warnings"] = skipped
+        return info
+
+    def _evict_finished(self) -> None:
+        """Keep the in-memory ring bounded; disk retains every run (A-02)."""
+        with self.lock:
+            finished = [run_id for run_id, handle in self.runs.items() if handle.finished]
+            excess = len(finished) - MAX_FINISHED_HANDLES
+            if excess <= 0:
+                return
+            for run_id in finished[:excess]:
+                self.runs.pop(run_id, None)
+            stale = {key for key, run_id in self.idempotency.items() if run_id not in self.runs}
+            for key in stale:
+                self.idempotency.pop(key, None)
+
     def history(self) -> list[dict[str, Any]]:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
-        result = []
-        for path in sorted(
+        paths = sorted(
             self.runs_dir.glob("[0-9a-f]" * 12 + ".jsonl"),
             key=lambda item: item.stat().st_mtime,
             reverse=True,
-        ):
-            try:
-                events = read_events(path)
-            except (OSError, ValueError):
-                continue
-            started = next((event for event in events if event["kind"] == "run_started"), {})
-            plan = next((event for event in events if event["kind"] == "plan_received"), {})
-            finish = next(
-                (event for event in reversed(events) if event["kind"] == "run_finished"), {}
-            )
-            saved = next((event for event in events if event["kind"] == "brief_saved"), {})
-            actual_models = [
-                {
-                    "stage": event.get("payload", {}).get("stage"),
-                    "provider": event.get("payload", {}).get("provider"),
-                    "model": event.get("payload", {}).get("model"),
-                }
-                for event in events
-                if event["kind"] == "model_call_completed"
-            ]
-            result.append(
-                {
-                    "run_id": path.stem,
-                    "engine": started.get("payload", {}).get("engine", "fods"),
-                    "mode": started.get("payload", {}).get(
-                        "mode", plan.get("payload", {}).get("mode", "unknown")
-                    ),
-                    "topic": started.get("payload", {}).get(
-                        "topic", plan.get("payload", {}).get("topic", "")
-                    ),
-                    "status": _status_from_finish(finish),
-                    "output_path": saved.get("payload", {}).get("path", ""),
-                    "models_used": actual_models,
-                    "elapsed_ms": finish.get("payload", {}).get("elapsed_ms"),
-                    "started_at": started.get("timestamp"),
-                    "ended_at": finish.get("timestamp"),
-                    "event_count": len(events),
-                    "visualization_url": f"/api/runs/{path.stem}/visualization",
-                }
-            )
+        )
+        result: list[dict[str, Any]] = []
+        with self.lock:
+            seen = {str(path) for path in paths}
+            for path in paths:
+                try:
+                    stat = path.stat()
+                except OSError:
+                    continue
+                key = (stat.st_mtime_ns, stat.st_size)
+                cached = self._history_cache.get(str(path))
+                if cached is not None and cached[0] == key:
+                    result.append(cached[1])
+                    continue
+                entry = self._history_entry(path)
+                if entry is None:
+                    continue
+                self._history_cache[str(path)] = (key, entry)
+                result.append(entry)
+            for stale in set(self._history_cache) - seen:
+                self._history_cache.pop(stale, None)
         return result[:100]
+
+    def _history_entry(self, path: Path) -> dict[str, Any] | None:
+        """One history row, tolerant of a corrupt line (A-02, A-09)."""
+        try:
+            events, skipped = read_events(path, strict=False)
+        except OSError:
+            return None
+        if not events:
+            return None
+        started = _first_event(events, "run_started") or {}
+        plan = _first_event(events, "plan_received") or {}
+        finish = _last_event(events, "run_finished") or {}
+        saved = _first_event(events, "brief_saved") or {}
+        actual_models = [
+            {
+                "stage": event.get("payload", {}).get("stage"),
+                "provider": event.get("payload", {}).get("provider"),
+                "model": event.get("payload", {}).get("model"),
+            }
+            for event in events
+            if event["kind"] == "model_call_completed"
+        ]
+        status = _status_from_finish(finish) if finish else "interrupted"
+        return self.sanitise(
+            {
+                "run_id": path.stem,
+                "engine": started.get("payload", {}).get("engine", "fods"),
+                "mode": started.get("payload", {}).get(
+                    "mode", plan.get("payload", {}).get("mode", "unknown")
+                ),
+                "topic": started.get("payload", {}).get(
+                    "topic", plan.get("payload", {}).get("topic", "")
+                ),
+                "status": status,
+                "output_path": saved.get("payload", {}).get("path", ""),
+                "models_used": actual_models,
+                "elapsed_ms": finish.get("payload", {}).get("elapsed_ms"),
+                "started_at": started.get("timestamp"),
+                "ended_at": finish.get("timestamp"),
+                "event_count": len(events),
+                "warnings": skipped,
+                "visualization_url": f"/api/runs/{path.stem}/visualization",
+            }
+        )
 
     def replay(self, source_run_id: str, speed_ms: int = 30) -> RunHandle:
         if not RUN_ID.fullmatch(source_run_id):
@@ -638,6 +734,7 @@ class RunManager:
         replay_id = uuid.uuid4().hex[:12]
         handle = RunHandle(replay_id, "replay", "", source_run_id=source_run_id)
         with self.lock:
+            self._evict_finished()
             self.runs[replay_id] = handle
 
         def play() -> None:
@@ -671,29 +768,34 @@ class RunManager:
             )
         return contexts[:100]
 
-    def brief(self, run_id: str) -> str | None:
+    def run_events(self, run_id: str) -> tuple[list[dict[str, Any]], int]:
+        """Events for a run, from memory or disk, plus any skipped corrupt lines."""
         handle = self.get(run_id)
-        events = handle.events if handle else []
-        if not events and RUN_ID.fullmatch(run_id):
-            path = self.runs_dir / f"{run_id}.jsonl"
-            if path.is_file():
-                events = read_events(path)
-        saved = next((event for event in events if event["kind"] == "brief_saved"), None)
+        if handle is not None:
+            return handle.events, 0
+        if not RUN_ID.fullmatch(run_id):
+            return [], 0
+        path = self.runs_dir / f"{run_id}.jsonl"
+        if not path.is_file() or not path.resolve().is_relative_to(self.runs_dir.resolve()):
+            return [], 0
+        return read_events(path, strict=False)
+
+    def brief(self, run_id: str) -> str | None:
+        events, skipped = self.run_events(run_id)
+        saved = _first_event(events, "brief_saved")
         if not saved:
+            if skipped:
+                raise ValueError("the recorded log is corrupt; the brief cannot be resolved")
             return None
-        target = Path(saved.get("payload", {}).get("path", "")).resolve()
+        stored = Path(str(saved.get("payload", {}).get("path", "")))
+        target = (stored if stored.is_absolute() else self.workspace / stored).resolve()
         if not target.is_relative_to(self.briefs_dir.resolve()) or not target.is_file():
             return None
         return target.read_text(encoding="utf-8")
 
     def brief_document(self, run_id: str, markdown: str) -> dict[str, Any]:
         """Machine-readable brief: the Markdown plus the recorded citations and sources."""
-        handle = self.get(run_id)
-        events = handle.events if handle else []
-        if not events and RUN_ID.fullmatch(run_id):
-            path = self.runs_dir / f"{run_id}.jsonl"
-            if path.is_file():
-                events = read_events(path)
+        events, _skipped = self.run_events(run_id)
         answer = _last_event(events, "research_answer") or _last_event(events, "answer_ready") or {}
         payload = answer.get("payload", {})
         citations = payload.get("citations") or payload.get("evidence_citations") or []
@@ -703,6 +805,19 @@ class RunManager:
             "citations": citations if isinstance(citations, list) else [],
             "sources": _sources_from(events),
         }
+
+
+def _brief_saved_payload(
+    output_path: str, stripped_citations: list[str] | None
+) -> dict[str, Any]:
+    """A-07: the validation flag follows the recorded check, never a constant."""
+    stripped = list(stripped_citations or [])
+    return {
+        "path": output_path,
+        "saved": True,
+        "citations_validated": not stripped,
+        "stripped_citations": stripped,
+    }
 
 
 def _status_from_finish(event: dict[str, Any]) -> str:
@@ -783,6 +898,34 @@ def _sources_from(events: list[dict[str, Any]]) -> list[str]:
     return sorted(names)
 
 
+def _host_allowed(host_header: str) -> bool:
+    """A-11: with no Host check, a rebound hostname could reach this API."""
+    host = host_header.strip()
+    if not host:
+        return True
+    if host.startswith("["):
+        name = host.split("]", 1)[0] + "]"
+    else:
+        name = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    return name.lower() in {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+def _origin_allowed(origin: str, port: int) -> bool:
+    """Allow this server's own origin and an explicitly configured dev origin."""
+    if not origin:
+        # Non-browser clients (tests, curl) send no Origin; Host is still checked.
+        return True
+    extra = os.getenv("RLA_FODS_DEV_ORIGIN", "").strip().rstrip("/")
+    if extra and origin.strip().rstrip("/") == extra:
+        return True
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if (parsed.hostname or "").lower() not in {"127.0.0.1", "localhost", "::1"}:
+        return False
+    return parsed.port in {port, None}
+
+
 def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager | None = None):
     manager = manager or RunManager()
 
@@ -804,8 +947,12 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
             if length is not None:
                 self.send_header("Content-Length", str(length))
 
-        def _json(self, status: int, value: Any) -> None:
-            body = json.dumps(safe_value(value), ensure_ascii=False).encode("utf-8")
+        def _json(self, status: int, value: Any, *, raw: bool = False) -> None:
+            # A-11: no absolute path leaves the server. A-08: a generated brief
+            # skips credential redaction (`safe_value` would mangle Markdown)
+            # but still goes through path sanitising.
+            payload = manager.sanitise(value if raw else safe_value(value))
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self._headers("application/json; charset=utf-8", len(body))
             self.end_headers()
@@ -822,6 +969,35 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
             if not isinstance(value, dict):
                 raise ValueError("request body must be a JSON object")
             return value
+
+        def _origin_guard(self) -> bool:
+            """A-11: reject writes from a foreign Host or Origin.
+
+            Cross-origin *reads* are already blocked by the missing CORS
+            headers, but a plain form post from another page can still trigger
+            a local run. Returns True when the request may proceed; otherwise
+            the rejection has already been written.
+            """
+
+            def reject(code: str, message: str) -> bool:
+                # Drain the body first: closing a keep-alive socket with unread
+                # bytes makes Windows reset the connection and the client never
+                # sees the 403.
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    length = 0
+                if 0 < length <= 65536:
+                    self.rfile.read(length)
+                self._json(403, {"error": message, "code": code})
+                return False
+
+            port = int(self.server.server_address[1])
+            if not _host_allowed(self.headers.get("Host", "")):
+                return reject("forbidden_host", "unexpected Host header")
+            if not _origin_allowed(self.headers.get("Origin", ""), port):
+                return reject("forbidden_origin", "cross-origin request refused")
+            return True
 
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
@@ -870,10 +1046,10 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                 return self._json(200, {"contexts": manager.contexts()})
             match = re.fullmatch(r"/api/runs/([0-9a-f]{12})", path)
             if match:
-                handle = manager.get(match.group(1))
-                if handle is None:
-                    return self._json(404, {"error": "run not found"})
-                return self._json(200, _handle_info(handle))
+                info = manager.info(match.group(1))
+                if info is None:
+                    return self._json(404, {"error": "run not found", "code": "run_not_found"})
+                return self._json(200, info)
             match = re.fullmatch(r"/api/runs/([0-9a-f]{12})/events", path)
             if match:
                 return self._events(manager, match.group(1), parse_qs(parsed.query))
@@ -881,22 +1057,41 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
             if match:
                 query = parse_qs(parsed.query)
                 run_id = match.group(1)
-                brief = manager.brief(run_id)
+                try:
+                    brief = manager.brief(run_id)
+                except (OSError, ValueError) as exc:
+                    return self._json(
+                        500,
+                        {
+                            "error": f"the saved brief could not be read: {exc}",
+                            "code": "brief_unreadable",
+                        },
+                    )
                 if brief is None:
                     return self._json(
-                        404, {"error": "no saved brief for this run", "code": "not_found"}
+                        404, {"error": "no saved brief for this run", "code": "brief_not_found"}
+                    )
+                encoded = brief.encode("utf-8")
+                if len(encoded) > MAX_BRIEF_BYTES:
+                    return self._json(
+                        413,
+                        {
+                            "error": "the saved brief is larger than the 2 MiB limit",
+                            "code": "brief_too_large",
+                        },
                     )
                 if query.get("format", [""])[0] == "json":
-                    return self._json(200, manager.brief_document(run_id, brief))
-                body = brief.encode("utf-8")
+                    return self._json(
+                        200, manager.brief_document(run_id, brief), raw=True
+                    )
                 self.send_response(200)
-                self._headers("text/markdown; charset=utf-8", len(body))
+                self._headers("text/markdown; charset=utf-8", len(encoded))
                 if query.get("download", ["0"])[0] in {"1", "true", "yes"}:
                     self.send_header(
                         "Content-Disposition", f'attachment; filename="{run_id}.md"'
                     )
                 self.end_headers()
-                return self.wfile.write(body)
+                return self.wfile.write(encoded)
             match = re.fullmatch(r"/api/runs/([0-9a-f]{12})/visualization", path)
             if match:
                 event_path = manager.runs_dir / f"{match.group(1)}.html"
@@ -908,13 +1103,15 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                     self._headers("text/html; charset=utf-8", len(body))
                     self.end_headers()
                     return self.wfile.write(body)
-                return self._json(404, {"error": "run visualization not found"})
-            return self._json(404, {"error": "not found"})
+                return self._json(
+                    404, {"error": "run visualization not found", "code": "not_found"}
+                )
+            return self._json(404, {"error": "not found", "code": "not_found"})
 
         def _static(self, name: str, content_type: str) -> None:
             path = WEB_ROOT / name
             if not path.is_file():
-                return self._json(404, {"error": "frontend asset missing"})
+                return self._json(404, {"error": "frontend asset missing", "code": "not_found"})
             body = path.read_bytes()
             self.send_response(200)
             self._headers(content_type, len(body))
@@ -925,18 +1122,20 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
             self, run_manager: RunManager, run_id: str, query: dict[str, list[str]]
         ) -> None:
             handle = run_manager.get(run_id)
-            if handle is None:
-                return self._json(404, {"error": "run not found"})
             try:
                 after = int(self.headers.get("Last-Event-ID", query.get("after", ["0"])[0]))
             except ValueError:
                 after = 0
+            if handle is None:
+                return self._events_from_disk(run_manager, run_id, after)
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache, no-transform")
             self.send_header("Connection", "keep-alive")
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
+            self.wfile.write(f"retry: {STREAM_RETRY_MS}\n\n".encode())
+            self.wfile.flush()
             index = 0
             status_reason = ""
             try:
@@ -973,9 +1172,15 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                             "source_run_id": handle.source_run_id or None,
                             "status": status,
                             "status_reason": status_reason,
+                            "historical": False,
+                            "warnings": 0,
                             "event": event,
                         }
-                        data = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
+                        data = json.dumps(
+                            run_manager.sanitise(envelope),
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
                         self.wfile.write(f"id: {event_id}\ndata: {data}\n\n".encode())
                         self.wfile.flush()
                         after = event_id
@@ -984,7 +1189,65 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
                 return
 
+        def _events_from_disk(self, run_manager: RunManager, run_id: str, after: int) -> None:
+            """A-02: a run from an earlier process is still streamable.
+
+            The log is authoritative; the stream is explicitly marked
+            `historical` so the browser cannot present it as a live run.
+            """
+            events, skipped = run_manager.run_events(run_id)
+            if not events and skipped:
+                return self._json(
+                    500,
+                    {
+                        "error": "the recorded log has no readable events",
+                        "code": "log_unreadable",
+                    },
+                )
+            if not events:
+                return self._json(404, {"error": "run not found", "code": "run_not_found"})
+            started = _first_event(events, "run_started") or {}
+            finish = _last_event(events, "run_finished") or {}
+            started_payload = started.get("payload", {})
+            status = _status_from_finish(finish) if finish else "interrupted"
+            status_reason = str(finish.get("payload", {}).get("termination_reason") or "")
+            run_kind = str(started_payload.get("mode") or "unknown")
+            self.close_connection = True
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            # A historical replay is finite: close so the client sees EOF.
+            self.send_header("Connection", "close")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+            try:
+                self.wfile.write(f"retry: {STREAM_RETRY_MS}\n\n".encode())
+                for event in events:
+                    event_id = int(event.get("seq", 0))
+                    if event_id <= after:
+                        continue
+                    envelope = {
+                        "run_kind": run_kind,
+                        "source_run_id": None,
+                        "status": status,
+                        "status_reason": status_reason,
+                        "historical": True,
+                        "warnings": skipped,
+                        "event": event,
+                    }
+                    data = json.dumps(
+                        run_manager.sanitise(envelope),
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    self.wfile.write(f"id: {event_id}\ndata: {data}\n\n".encode())
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
+                return
+
         def do_POST(self) -> None:  # noqa: N802
+            if not self._origin_guard():
+                return
             try:
                 value = self._body()
                 if self.path == "/api/runs":
@@ -1029,16 +1292,29 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                 return self._json(404, {"error": str(exc), "code": "not_found"})
 
         def do_DELETE(self) -> None:  # noqa: N802
+            if not self._origin_guard():
+                return
             match = re.fullmatch(r"/api/runs/([0-9a-f]{12})", urlparse(self.path).path)
             if not match:
-                return self._json(404, {"error": "not found"})
+                return self._json(404, {"error": "not found", "code": "not_found"})
             handle = manager.get(match.group(1))
             if handle is None:
-                return self._json(404, {"error": "run not found"})
+                return self._json(
+                    404, {"error": "run not found", "code": "run_not_found"}
+                )
             if handle.finished:
-                return self._json(409, {"error": "run is already finished"})
+                return self._json(
+                    409, {"error": "run is already finished", "code": "run_finished"}
+                )
             handle.cancel_event.set()
-            return self._json(202, {"run_id": handle.run_id, "status": "cancellation_requested"})
+            return self._json(
+                202,
+                {
+                    "run_id": handle.run_id,
+                    "status": "cancellation_requested",
+                    "code": "cancellation_requested",
+                },
+            )
 
     return ThreadingHTTPServer((host, port), Handler), manager
 

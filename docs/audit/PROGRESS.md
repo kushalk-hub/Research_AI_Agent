@@ -34,7 +34,7 @@ This file is the durable memory of the work. Update after every slice.
 | 1.1 | Owner review fixes: neutral copy, footer, shared column, e2e isolation, contrast, 768 layout, N-shortcut, recents, CSP assertion | **done** | `fix(ui)` commit | pytest 813+1 · ruff clean · build green · vitest 83 · Playwright 4 | — |
 | 2 | Composer `+` menu, mode, config, advanced validation, budget | **done** | `feat(ui)` commit | pytest 817+1 · ruff clean · build 24.15 kB css / 275.99 kB js · vitest 112 · Playwright 5 | — |
 | 3a | Backend for UI: enrichment, `pipeline`, status, terminal guarantee, brief JSON, codes | **done** | `feat(backend)` commit | pytest 838+1 · ruff clean · replay of the golden log byte-identical | - |
-| 3b | Backend hardening: A-02, A-03, A-07, A-08, A-09, A-11 | planned | — | |
+| 3b | Backend hardening: A-02, A-03, A-07, A-08, A-09, A-11 | **done** (A-03 was slice 3a: `pipeline` + `capabilities.rla_live`) | `feat(backend)` commit | pytest 855+1 · ruff clean · 69 stored logs clean · 7 absolute paths → 0 | - |
 | 4 | Thread lifecycle: working lines, chip, New investigation, Stop | planned | — | |
 | 5 | Answer + evidence: citation chips, scroll, `[C#]` | planned | — | |
 | 6 | Brief overlay | planned | — | |
@@ -223,7 +223,7 @@ screenshots were regenerated because the composer gained the `+` trigger.
    Markdown; `?format=json` returns `{run_id, markdown, citations, sources}` (sources read
    from the recorded `context_ready`/`research_papers`); `?download=1` adds
    `Content-Disposition: attachment; filename="<run_id>.md"`. A missing brief is
-   `404 {code: "not_found"}`.
+   `404 {code: "brief_not_found"}` (slice 3b; 3a used the generic `not_found`).
 8. **Stable error codes (A-12 groundwork).** POST errors now carry `code`: `validation`
    (pydantic, with `fields`), `budget_override_required` (with `fields`), `invalid_request`,
    `conflict`, `not_found`.
@@ -243,6 +243,66 @@ invented `summary`/`phase`/`class` on old records, `status="replayed"`,
 **Not verified here.** Docker on 8765 is not running on this machine, so the container's old
 UI was not re-checked; slice 9 rebuilds it. `src/fods/web/` is untouched and its `dist/` is
 gitignored.
+
+## Slice 3b detail (backend hardening)
+
+**Files.** `src/fods/safety.py`; `src/fods/events.py`; `src/fods/webapp.py`; new
+`tests/test_fods_safety.py`; additions to `tests/test_fods_webapp.py`.
+
+1. **A-02 — a run outlives the process.** `GET /api/runs/<id>` and
+   `GET /api/runs/<id>/events` no longer require a live handle. When the handle is absent (a
+   restart, or an evicted run) both are served from `data/fods/runs/<id>.jsonl`:
+   - the info response is marked `"historical": true`;
+   - the SSE replay is the recorded log, every envelope carrying `"historical": true` and the
+     final `status`/`status_reason`; it starts with `retry: 3000` so EventSource reconnects if
+     the connection drops, and it sends `Connection: close` because a replay is finite;
+   - `Last-Event-ID` still works on the disk path.
+   A run the memory ring has evicted stays readable from disk.
+2. **A-02 — bounded memory.** `MAX_FINISHED_HANDLES = 24`. `_evict_finished()` drops the oldest
+   finished handles (and their idempotency keys) before each `start()`/`replay()`; running
+   handles are never evicted. The disk is the retention policy, not the process.
+3. **A-09 — one corrupt line hides nothing.** `read_events(path, strict=False)` returns
+   `(events, skipped)`; `EventLog`/CLI call sites keep the strict default. `RunManager.history()`
+   and the disk paths use the tolerant form, so a half-written line costs that line, not the
+   run: the row appears with `warnings: <n>` and, with no readable `run_finished`, status
+   `interrupted`. History rows are cached by `(st_mtime_ns, st_size)` and reparsed only when the
+   file changes; entries for deleted files are dropped.
+4. **A-07 — the validation flag follows the check.** `_brief_saved_payload()` sets
+   `citations_validated = not stripped_citations` and records `stripped_citations`. A run that
+   had an unsupported citation id no longer emits a "validated" claim.
+5. **A-08 — brief failure modes.** A brief over `MAX_BRIEF_BYTES` (2 MiB) is
+   `413 {code: "brief_too_large"}`; a brief that cannot be resolved because the log is corrupt is
+   `500 {code: "brief_unreadable"}`; a missing brief is `404 {code: "brief_not_found"}`.
+   `?format=json` skips credential redaction (so Markdown is not mangled) but is still
+   path-sanitised.
+6. **A-11 — no absolute paths, no foreign writes.** `safety.relative_path()` /
+   `sanitise_paths()` rewrite `C:\…` and `/Users|/home|…` paths to workspace-relative ones
+   (`…/basename` when the root is unknown). They run at **emit** time
+   (`EventLog(roots=…)`, used by the webapp) and again at the **serve** layer (JSON, SSE, history,
+   disk replay), so records written before this rule are scrubbed on the way out. `do_POST` and
+   `do_DELETE` now require a loopback `Host` and either no `Origin` or this server's own origin
+   (plus `RLA_FODS_DEV_ORIGIN` for the Vite dev server); rejection drains the body first so the
+   client actually receives the 403. Codes: `forbidden_host`, `forbidden_origin`.
+7. **A-12 — codes on delete/history paths.** `run_not_found`, `run_finished`,
+   `cancellation_requested`, `log_unreadable`, `brief_not_found`, `brief_too_large`,
+   `brief_unreadable`.
+
+**Slice 3b gate (measured, this worktree):** pytest `855 passed, 1 skipped in 294.84s` (was
+838+1; +17: 6 safety, 11 webapp); `ruff check src/ tests/` all checks passed; vite build
+unchanged at 24.15 kB css / 275.99 kB js (no frontend source touched); vitest
+`112 passed in 11 files`; Playwright `5 passed (7.9s)`; `data/` untouched (`git status` clean).
+
+**Slice 3b parity (read-only, against the stored corpus).** 69 hex-named logs plus 20 benchmark
+logs: strict and tolerant readers agree on every hex log (0 skipped lines, 0 strict failures);
+history returns 69 rows with 0 warnings and no absolute path in the serialised output.
+`efee736eb669` (the known A-11 record) has **7** absolute paths in the raw events and **0** after
+sanitising; its stored brief path is served as `data/fods/briefs/efee736eb669.md`. The single
+`interrupted` row is `8c5a5ba36606`, the pre-3a `plan_rejected` run that genuinely has no
+`run_finished`; before this slice it was reported as `unknown`.
+
+**Not verified here.** The Docker image on 8765 was not running, so the container path is
+NOT VERIFIED for 3b too. No browser was used to exercise the new `retry:`/`historical` fields;
+that wiring lands in slice 4.
 
 ## Blockers / notes
 

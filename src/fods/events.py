@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fods.event_meta import describe
-from fods.safety import safe_value
+from fods.safety import safe_value, sanitise_paths
 
 
 @dataclass(slots=True)
@@ -42,16 +42,20 @@ class EventLog:
         self,
         path: Path | None = None,
         sink: Callable[[RuntimeEvent], None] | None = None,
+        roots: tuple[str, ...] = (),
     ) -> None:
         self.path = path
         self.sink = sink
+        # A-11: when the log feeds a browser, absolute paths are rewritten at
+        # emit time. Empty by default, so CLI logs stay as written.
+        self.roots = roots
         self.events: list[RuntimeEvent] = []
         if self.path is not None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def emit(self, kind: str, message: str, **payload: Any) -> RuntimeEvent:
-        safe_message = safe_value(message)
-        safe_payload = safe_value(payload)
+        safe_message = sanitise_paths(safe_value(message), self.roots)
+        safe_payload = sanitise_paths(safe_value(payload), self.roots)
         event = RuntimeEvent(
             len(self.events) + 1,
             kind,
@@ -68,13 +72,33 @@ class EventLog:
         return event
 
 
-def read_events(path: Path) -> list[dict[str, Any]]:
+def read_events(
+    path: Path, *, strict: bool = True
+) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], int]:
+    """Read a JSONL event log.
+
+    ``strict=True`` keeps the historical contract: a malformed line raises
+    ``ValueError``. ``strict=False`` returns ``(events, skipped)`` so a single
+    corrupt write cannot hide a run from the history or break a backfill.
+    """
     events: list[dict[str, Any]] = []
+    skipped = 0
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if not line.strip():
             continue
         try:
-            events.append(json.loads(line))
+            value = json.loads(line)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid event JSON on line {line_number}: {exc}") from exc
-    return events
+            if strict:
+                raise ValueError(f"invalid event JSON on line {line_number}: {exc}") from exc
+            skipped += 1
+            continue
+        if not isinstance(value, dict):
+            if strict:
+                raise ValueError(f"invalid event on line {line_number}: expected an object")
+            skipped += 1
+            continue
+        events.append(value)
+    if strict:
+        return events
+    return events, skipped

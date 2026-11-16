@@ -10,12 +10,14 @@ from urllib.request import Request, urlopen
 import pytest
 from pydantic import ValidationError
 
+from fods import webapp
 from fods.events import EventLog
 from fods.webapp import (
     BudgetOverrideRequired,
     NewRun,
     RunHandle,
     RunManager,
+    _brief_saved_payload,
     _handle_info,
     _rla_stages,
     make_server,
@@ -613,7 +615,7 @@ def test_brief_404s_with_a_code_when_no_brief_was_saved(tmp_path):
         with pytest.raises(HTTPError) as raised:
             urlopen(base + f"/api/runs/{run_id}/brief", timeout=5)
         assert raised.value.code == 404
-        assert json.loads(raised.value.read())["code"] == "not_found"
+        assert json.loads(raised.value.read())["code"] == "brief_not_found"
     finally:
         server.shutdown()
         server.server_close()
@@ -708,3 +710,331 @@ def test_invalid_run_request_returns_a_code_and_field_errors(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+# --- slice 3b: disk fallback, tolerance, hygiene, origin guard ---------------
+
+
+def _write_log(manager: RunManager, run_id: str, events: list[dict]) -> None:
+    manager.runs_dir.mkdir(parents=True, exist_ok=True)
+    (manager.runs_dir / f"{run_id}.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8"
+    )
+
+
+def _log_events(topic: str = "Restart", store: str = "") -> list[dict]:
+    started = {
+        "seq": 1,
+        "kind": "run_started",
+        "message": "started",
+        "payload": {"engine": "fods", "mode": "simulate", "topic": topic},
+        "timestamp": 10.0,
+    }
+    if store:
+        started["payload"]["extraction_store"] = store
+    return [
+        started,
+        {
+            "seq": 2,
+            "kind": "run_finished",
+            "message": "done",
+            "payload": {
+                "succeeded": True,
+                "termination_reason": "completed",
+                "elapsed_ms": 12.5,
+            },
+            "timestamp": 11.0,
+        },
+    ]
+
+
+def test_history_is_cached_and_invalidated_by_an_append(tmp_path, monkeypatch):
+    manager = RunManager(_settings(tmp_path))
+    run_id = "0123456789ab"
+    path = manager.runs_dir / f"{run_id}.jsonl"
+    _write_log(manager, run_id, _log_events())
+
+    real_read = webapp.read_events
+    calls = {"count": 0}
+
+    def counting(*args, **kwargs):
+        calls["count"] += 1
+        return real_read(*args, **kwargs)
+
+    monkeypatch.setattr(webapp, "read_events", counting)
+
+    first = manager.history()
+    after_first = calls["count"]
+    second = manager.history()
+
+    assert first == second
+    assert calls["count"] == after_first  # cached: no second parse
+    assert first[0]["event_count"] == 2
+
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {"seq": 3, "kind": "log_note", "message": "appended", "payload": {}}
+            )
+            + "\n"
+        )
+
+    third = manager.history()
+
+    assert calls["count"] > after_first  # (mtime, size) changed
+    assert third[0]["event_count"] == 3
+
+
+def test_history_keeps_a_run_with_a_corrupt_line_and_reports_it(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    _write_log(manager, "0123456789ab", _log_events()[:1])
+    (manager.runs_dir / "0123456789ab.jsonl").open("a", encoding="utf-8").write(
+        "{ not json at all\n"
+    )
+
+    rows = manager.history()
+
+    assert [row["run_id"] for row in rows] == ["0123456789ab"]
+    assert rows[0]["status"] == "interrupted"  # no readable run_finished
+    assert rows[0]["warnings"] == 1
+    assert rows[0]["event_count"] == 1
+
+
+def test_history_rewrites_absolute_paths_before_they_leave_the_server(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    brief = manager.briefs_dir / "0123456789ab.md"
+    events = _log_events()
+    events.append(
+        {
+            "seq": 3,
+            "kind": "brief_saved",
+            "message": "saved",
+            "payload": {"path": str(brief), "saved": True},
+            "timestamp": 12.0,
+        }
+    )
+    _write_log(manager, "0123456789ab", events)
+
+    row = manager.history()[0]
+
+    assert row["output_path"] == "data/fods/briefs/0123456789ab.md"
+    assert str(tmp_path) not in json.dumps(row)
+
+
+def test_info_and_stream_come_from_disk_after_a_restart(tmp_path):
+    settings = _settings(tmp_path)
+    first = RunManager(settings)
+    run_id = "0123456789ab"
+    _write_log(first, run_id, _log_events(store=str(tmp_path / "data" / "x.jsonl")))
+
+    restarted = RunManager(settings)
+    info = restarted.info(run_id)
+
+    assert info is not None
+    assert info["historical"] is True
+    assert info["status"] == "completed"
+    assert info["status_reason"] == "completed"
+    assert info["warnings"] == 0
+
+    server, _mgr = make_server("127.0.0.1", 0, restarted)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urlopen(base + f"/api/runs/{run_id}", timeout=5) as response:
+            served = json.loads(response.read())
+        assert served["historical"] is True
+
+        request = Request(
+            base + f"/api/runs/{run_id}/events", headers={"Connection": "close"}
+        )
+        lines: list[str] = []
+        retry_seen = False
+        with urlopen(request, timeout=5) as response:
+            for raw in response:
+                text = raw.decode("utf-8")
+                if text.startswith("retry:"):
+                    retry_seen = True
+                if text.startswith("data: "):
+                    lines.append(text)
+                    if len(lines) == 2:
+                        break
+        assert retry_seen
+        assert len(lines) == 2
+        body = "".join(lines)
+        assert '"historical":true' in body
+        assert str(tmp_path) not in body
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_disk_stream_honours_last_event_id(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    run_id = "0123456789ab"
+    _write_log(manager, run_id, _log_events())
+
+    server, _mgr = make_server("127.0.0.1", 0, manager)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        request = Request(
+            base + f"/api/runs/{run_id}/events",
+            headers={"Last-Event-ID": "1", "Connection": "close"},
+        )
+        with urlopen(request, timeout=5) as response:
+            lines = []
+            for raw in response:
+                if raw.startswith(b"data: "):
+                    lines.append(raw)
+                    break
+        assert len(lines) == 1
+        assert json.loads(lines[0][6:])["event"]["seq"] == 2
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_a_corrupt_log_without_a_brief_is_a_500_with_a_code(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    manager.runs_dir.mkdir(parents=True, exist_ok=True)
+    (manager.runs_dir / "0123456789ab.jsonl").write_text("{broken\n", encoding="utf-8")
+
+    server, _mgr = make_server("127.0.0.1", 0, manager)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with pytest.raises(HTTPError) as raised:
+            urlopen(base + "/api/runs/0123456789ab/brief", timeout=5)
+        assert raised.value.code == 500
+        assert json.loads(raised.value.read())["code"] == "brief_unreadable"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_an_oversize_brief_is_refused_with_413(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    brief = manager.briefs_dir / "0123456789ab.md"
+    brief.parent.mkdir(parents=True, exist_ok=True)
+    brief.write_text("x" * (webapp.MAX_BRIEF_BYTES + 1), encoding="utf-8")
+    events = _log_events()
+    events.append(
+        {
+            "seq": 3,
+            "kind": "brief_saved",
+            "message": "saved",
+            "payload": {"path": str(brief)},
+            "timestamp": 12.0,
+        }
+    )
+    _write_log(manager, "0123456789ab", events)
+
+    server, _mgr = make_server("127.0.0.1", 0, manager)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with pytest.raises(HTTPError) as raised:
+            urlopen(base + "/api/runs/0123456789ab/brief", timeout=10)
+        assert raised.value.code == 413
+        assert json.loads(raised.value.read())["code"] == "brief_too_large"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_the_brief_validation_flag_follows_the_recorded_stripped_citations():
+    clean = _brief_saved_payload("data/fods/briefs/x.md", [])
+    dropped = _brief_saved_payload("data/fods/briefs/x.md", ["[9]"])
+
+    assert clean["citations_validated"] is True
+    assert clean["stripped_citations"] == []
+    assert dropped["citations_validated"] is False
+    assert dropped["stripped_citations"] == ["[9]"]
+
+
+def test_finished_handles_are_evicted_but_stay_readable_from_disk(tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "MAX_FINISHED_HANDLES", 1)
+    manager = RunManager(_settings(tmp_path))
+    run_ids = ["0" * 12, "1" * 12]
+    for run_id in run_ids:
+        _write_log(manager, run_id, _log_events())
+        handle = RunHandle(run_id, "simulate", "Restart")
+        handle.status = "completed"
+        handle.finished = True
+        manager.runs[run_id] = handle
+
+    manager._evict_finished()
+
+    assert len(manager.runs) == 1
+    evicted = next(run_id for run_id in run_ids if run_id not in manager.runs)
+    info = manager.info(evicted)
+    assert info is not None and info["historical"] is True
+    assert len(manager.history()) == 2
+
+
+def _post_run(base: str, headers: dict[str, str]):
+    request = Request(
+        base + "/api/runs",
+        data=json.dumps(
+            {
+                "topic": "Origin guard",
+                "question": "Is a foreign page allowed to start a run?",
+                "mode": "simulate",
+                "planner": "fixture",
+                "delay_ms": 0,
+            }
+        ).encode("utf-8"),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
+    return urlopen(request, timeout=10)
+
+
+def test_a_foreign_origin_or_host_cannot_start_a_run(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    server, _mgr = make_server("127.0.0.1", 0, manager)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with pytest.raises(HTTPError) as raised:
+            _post_run(base, {"Origin": "http://evil.example"})
+        assert raised.value.code == 403
+        assert json.loads(raised.value.read())["code"] == "forbidden_origin"
+
+        with pytest.raises(HTTPError) as raised:
+            _post_run(base, {"Host": "evil.example"})
+        assert raised.value.code == 403
+        assert json.loads(raised.value.read())["code"] == "forbidden_host"
+
+        assert manager.runs == {}
+
+        with _post_run(base, {"Origin": base}) as response:
+            assert response.status == 202
+            started = json.loads(response.read())
+        deadline = time.monotonic() + 10
+        handle = manager.get(started["run_id"])
+        while handle is not None and not handle.finished and time.monotonic() < deadline:
+            time.sleep(0.02)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_a_configured_dev_origin_is_allowed(tmp_path, monkeypatch):
+    from fods.webapp import _origin_allowed
+
+    monkeypatch.setenv("RLA_FODS_DEV_ORIGIN", "http://127.0.0.1:5173")
+    assert _origin_allowed("http://127.0.0.1:5173", 8901) is True
+    assert _origin_allowed("http://127.0.0.1:9999", 8901) is False
+    assert _origin_allowed("", 8901) is True
+
