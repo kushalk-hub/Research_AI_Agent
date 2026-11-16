@@ -1,5 +1,57 @@
 # Setup and Commands
 
+## 0. Dependency and environment checks
+
+Run these before creating the venv. If any check fails, install the missing tool first.
+
+```powershell
+git --version
+gh --version
+py -3.12 --version
+node --version
+npm --version
+docker --version
+```
+
+Ollama is required for the local planner and embedding models (`ollama/qwen3:4b` and
+`ollama/nomic-embed-text`):
+
+```powershell
+ollama --version
+ollama list
+```
+
+If `ollama` is missing, install it from https://ollama.com/download and restart the terminal.
+If the models are missing, pull them:
+
+```powershell
+ollama pull qwen3:4b
+ollama pull nomic-embed-text
+```
+
+If `ollama list` cannot connect, start the service:
+
+```powershell
+ollama serve
+```
+
+Playwright needs browser binaries in addition to `npm install`:
+
+```powershell
+cd stitch_aesthetic_markdown_reader
+npx playwright install chromium
+cd ..
+```
+
+After the Python venv and frontend dependencies are installed, verify the runtime and sources:
+
+```powershell
+.\.venv\Scripts\python.exe -m fods.cli doctor
+.\.venv\Scripts\python.exe -m fods.cli sources
+```
+
+`doctor --llm` is optional and needs `GEMINI_API_KEY` in `.env`.
+
 ## 1. Clone and branch
 
 ```powershell

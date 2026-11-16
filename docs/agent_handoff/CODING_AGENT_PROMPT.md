@@ -13,6 +13,12 @@ First read these files in this order:
 5. docs/agent_handoff/CURRENT_STATE.md
 6. docs/agent_handoff/NEXT_SLICE_9_PROMPT.md
 
+Before baseline checks, verify dependencies:
+- git, gh, Python 3.12, Node, npm, Docker
+- Ollama with `qwen3:4b` and `nomic-embed-text`
+- Playwright Chromium via `npx playwright install chromium`
+- `.env` exists; `GEMINI_API_KEY` is optional
+
 Then run the baseline checks from docs/agent_handoff/SETUP_AND_COMMANDS.md. Do not edit anything until all baseline checks pass.
 
 Current state:
