@@ -34,5 +34,6 @@ Read these files first:
 3. `docs/audit/AUDIT_FINDINGS.md`
 4. `docs/audit/PROGRESS.md`
 5. `docs/agent_handoff/CODING_AGENT_PROMPT.md`
+6. `NEW_AGENT_PROMPT.md` (the replacement agent's full prompt, including Gate B)
 
 Then run the baseline checks in `docs/agent_handoff/SETUP_AND_COMMANDS.md`.
