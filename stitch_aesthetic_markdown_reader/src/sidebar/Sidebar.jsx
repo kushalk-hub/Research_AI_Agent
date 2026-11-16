@@ -1,7 +1,13 @@
 import { Plus, RotateCw } from "lucide-react";
 import { ROUTES } from "../app/routes.js";
-import { modeShort, statusLabel } from "../lib/events.js";
+import { modeShort, statusLabel, statusTone } from "../lib/events.js";
+import { relativeTime, toMillis } from "../lib/format.js";
 import ThemeToggle from "../ui/ThemeToggle.jsx";
+
+function absoluteTime(value) {
+  const millis = toMillis(value);
+  return millis ? new Date(millis).toISOString() : "";
+}
 
 export default function Sidebar({
   page,
@@ -79,13 +85,26 @@ export default function Sidebar({
               className="recent"
               aria-current={item.live ? "true" : undefined}
               onClick={() => onOpenRecent(item)}
-              title={`${item.topic || "Untitled investigation"} — ${item.mode === "simulate" ? "deterministic demo" : item.mode}`}
+              title={`${item.topic || "Untitled investigation"} — ${modeShort(item.mode)} · ${statusLabel(item.status)}${item.at ? ` · ${absoluteTime(item.at)}` : ""}`}
             >
               <span className="recent-title">{item.topic || "Untitled investigation"}</span>
               <span className="recent-meta">
-                <span>{modeShort(item.mode)}</span>
-                <span aria-hidden="true">·</span>
-                <span>{statusLabel(item.status)}</span>
+                <i
+                  className="recent-dot"
+                  data-tone={statusTone(item.status)}
+                  aria-hidden="true"
+                />
+                <span className="visually-hidden">{statusLabel(item.status)}</span>
+                {item.mode === "replay" && <span className="badge recent-badge">Replay</span>}
+                {item.at ? (
+                  <time
+                    className="recent-time"
+                    dateTime={absoluteTime(item.at)}
+                    title={absoluteTime(item.at)}
+                  >
+                    {relativeTime(item.at)}
+                  </time>
+                ) : null}
                 <code>{item.run_id}</code>
               </span>
             </button>
@@ -95,11 +114,20 @@ export default function Sidebar({
       </div>
 
       <div className="sidebar-foot">
-        <span className="conn" data-state={ready ? "ready" : connection === "down" ? "down" : "connecting"}>
+        <span
+          className="conn"
+          data-state={ready ? "ready" : connection === "down" ? "down" : "connecting"}
+        >
           <i aria-hidden="true" />
-          {ready ? "Local runtime ready" : connection === "down" ? "Runtime unreachable" : "Connecting…"}
+          <span className="conn-label">
+            {ready
+              ? "Local runtime ready"
+              : connection === "down"
+                ? "Runtime unreachable"
+                : "Connecting…"}
+          </span>
         </span>
-        <ThemeToggle />
+        <ThemeToggle compact />
       </div>
     </aside>
   );

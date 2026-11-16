@@ -7,7 +7,7 @@ const ICON = { system: Monitor, light: Sun, dark: Moon };
 
 /** Cycles system → light → dark. Writes `data-theme` on <html>; never an inline
  *  style attribute, because the served build blocks inline styles. */
-export default function ThemeToggle() {
+export default function ThemeToggle({ compact = false }) {
   const { theme } = useStore();
   const dispatch = useDispatch();
   const next = NEXT[theme] || "system";
@@ -16,7 +16,7 @@ export default function ThemeToggle() {
   return (
     <button
       type="button"
-      className="btn btn--ghost btn--sm"
+      className={`btn btn--ghost btn--sm theme-toggle${compact ? " theme-toggle--compact" : ""}`}
       aria-label={`${LABEL[theme]}. Switch to ${LABEL[next].toLowerCase()}.`}
       title={`${LABEL[theme]} — click for ${LABEL[next].toLowerCase()}`}
       onClick={() => dispatch({ type: "ui/theme", theme: next })}

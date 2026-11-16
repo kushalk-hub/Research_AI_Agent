@@ -22,13 +22,18 @@ export function selectRecents(state) {
       status: run.status,
       event_count: run.events.length,
       source_run_id: run.sourceRunId,
+      at: run.openedAt || null,
       live: run.stream === "live" || run.stream === "connecting",
     }));
 
   const seen = new Set(fromTab.map((item) => item.run_id));
   const fromDisk = state.history
     .filter((item) => !seen.has(item.run_id))
-    .map((item) => ({ ...item, live: false }));
+    .map((item) => ({
+      ...item,
+      at: item.started_at || item.ended_at || null,
+      live: false,
+    }));
 
   return [...fromTab, ...fromDisk];
 }

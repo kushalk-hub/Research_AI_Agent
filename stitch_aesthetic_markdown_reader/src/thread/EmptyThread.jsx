@@ -11,11 +11,8 @@ export default function EmptyThread({ onFocusComposer }) {
       <span className="chip" data-tone="live">
         Event-backed workspace
       </span>
-      <h1>Ask a question the record can prove.</h1>
-      <p>
-        Every answer, citation and task state on this screen comes from an event the runtime
-        recorded. Nothing is shown as measured unless it was measured.
-      </p>
+      <h1>What should we investigate?</h1>
+      <p>Every panel on this page reads from the events a run records.</p>
 
       <div className="demo-row">
         <button

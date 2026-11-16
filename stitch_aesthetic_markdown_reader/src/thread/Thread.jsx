@@ -6,8 +6,10 @@ export default function Thread({ state, run, onFocusComposer, onOpenTrace }) {
   if (!run) return <EmptyThread onFocusComposer={onFocusComposer} />;
   const turn = selectTurn(state, run);
   return (
-    <div className="thread">
-      <Turn turn={turn} onOpenTrace={onOpenTrace} />
+    <div className="thread-dock">
+      <div className="thread">
+        <Turn turn={turn} onOpenTrace={onOpenTrace} />
+      </div>
     </div>
   );
 }

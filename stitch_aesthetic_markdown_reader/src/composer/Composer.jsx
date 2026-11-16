@@ -96,7 +96,7 @@ export default function Composer({ config, inputRef }) {
           {Number.isFinite(budget) && budget > 0 && (
             <span
               className="chip"
-              title="Configured per-run LLM request cap. It is a local budget, not a provider quota guarantee."
+              title="Configured per-run LLM request cap. A local budget, not a provider quota."
             >
               {budget}-call cap
             </span>

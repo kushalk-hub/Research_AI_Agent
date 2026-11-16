@@ -168,7 +168,7 @@ describe("App shell", () => {
     await screen.findByRole("article");
     fireEvent.click(screen.getByRole("button", { name: /new investigation/i }));
 
-    expect(await screen.findByText(/ask a question the record can prove/i)).toBeTruthy();
+    expect(await screen.findByText(/what should we investigate/i)).toBeTruthy();
     expect(screen.queryByRole("article")).toBeNull();
     expect(screen.getByTitle(/Deterministic demo/)).toBeTruthy();
   });
@@ -181,5 +181,35 @@ describe("App shell", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
     fireEvent.click(screen.getByRole("button", { name: /dark theme/i }));
     expect(document.documentElement.dataset.theme).toBeUndefined();
+  });
+
+  it("ignores the N shortcut while typing or when a modifier is held", async () => {
+    renderApp();
+    fireEvent.click(await screen.findByRole("button", { name: /run the deterministic demo/i }));
+    await waitFor(() => expect(FakeEventSource.last().onmessage).toBeTypeOf("function"));
+    FakeEventSource.last().emit({ seq: 1, kind: "run_started", payload: {} });
+    await screen.findByRole("article");
+
+    const box = screen.getByLabelText(/research question/i);
+    box.focus();
+    fireEvent.keyDown(box, { key: "n" });
+    expect(screen.queryByRole("article")).toBeTruthy();
+
+    for (const modifier of ["ctrlKey", "metaKey", "altKey"]) {
+      fireEvent.keyDown(document.body, { key: "n", [modifier]: true });
+      expect(screen.queryByRole("article")).toBeTruthy();
+    }
+
+    const editable = document.createElement("div");
+    editable.setAttribute("contenteditable", "true");
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    document.body.appendChild(editable);
+    fireEvent.keyDown(editable, { key: "n" });
+    expect(screen.queryByRole("article")).toBeTruthy();
+    editable.remove();
+
+    fireEvent.keyDown(document.body, { key: "n" });
+    expect(await screen.findByText(/what should we investigate/i)).toBeTruthy();
+    expect(screen.queryByRole("article")).toBeNull();
   });
 });

@@ -52,6 +52,7 @@
   --sidebar-w: 280px;
   --sidebar-w-rail: 64px;
   --content-max: 880px;
+  --content-gutter: var(--sp-6);
   --row-h: 32px;
 
   --focus-ring: 2px solid var(--accent);
@@ -80,7 +81,7 @@
   --err-weak: #fcebeb;
   --blocked: #6b5d7a;
   --blocked-weak: #f1edf5;
-  --queued: #7a8285;
+  --queued: #646c6f;
   --queued-weak: #f0f2f2;
   --overlay: rgba(16, 20, 19, 0.32);
 }
