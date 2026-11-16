@@ -85,4 +85,7 @@ export const api = {
     }
     return response.text();
   },
+
+  /** UI-10: the brief as content, not a raw download in a new tab. */
+  briefDocument: (runId) => request(`/api/runs/${runId}/brief?format=json`),
 };

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { collectCitations } from "../lib/citations.js";
+import BriefOverlay from "./BriefOverlay.jsx";
 import { CitationList, CitationText } from "./Citations.jsx";
 import EvidencePanel from "./EvidencePanel.jsx";
 
@@ -8,9 +9,10 @@ import EvidencePanel from "./EvidencePanel.jsx";
  *  A-07 honesty: a stripped citation is reported as removed, and a cited label
  *  with no recorded evidence gets an explicit "no recorded evidence" card. The
  *  card never claims the answer, or any citation, passed a semantic check. */
-export default function AnswerCard({ answer }) {
+export default function AnswerCard({ answer, runId }) {
   const [selected, setSelected] = useState("");
   const [hovered, setHovered] = useState("");
+  const [briefOpen, setBriefOpen] = useState(false);
 
   const labels = collectCitations(answer.text);
   const active = hovered || selected;
@@ -62,6 +64,16 @@ export default function AnswerCard({ answer }) {
               not recorded, not as checked.
             </p>
           )}
+
+          <div className="answer-actions">
+            <button
+              type="button"
+              className="btn btn--sm"
+              onClick={() => setBriefOpen(true)}
+            >
+              Open brief
+            </button>
+          </div>
         </div>
 
         <EvidencePanel
@@ -73,6 +85,8 @@ export default function AnswerCard({ answer }) {
           onHoverEnd={onHoverEnd}
         />
       </div>
+
+      {briefOpen && <BriefOverlay runId={runId} onClose={() => setBriefOpen(false)} />}
     </section>
   );
 }

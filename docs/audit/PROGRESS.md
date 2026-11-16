@@ -10,7 +10,7 @@ This file is the durable memory of the work. Update after every slice.
 | # | Decision | State |
 |---|---|---|
 | 1 | Separate worktree + new branch; own venv; `main` staging untouched | done (`D:\fods-studio-redesign`, venv at `.venv`) |
-| 2 | UI-07 = option (a) labelled phase graph + "Run the deterministic demo" chip in the empty thread | planned (slice 8 + slice 1) |
+| 2 | UI-07 = option (a) labelled phase graph + "Run the deterministic demo" chip in the empty thread | partly done (chip in slice 1; phase graph in slice 8) |
 | 3 | `vitest`, `@testing-library/react`, `jsdom` pinned; Playwright dev-only via `npm run test:e2e`, never in Docker | done (slice 1; exact pins, licence-clean) |
 | 4 | RLA cooperative cancel, minimal diff; stop and ask if invasive | **done** (slice 4; the diff stays in `webapp._execute_research_pipeline`, `src/rla` untouched) |
 | 5 | Budget = configured cap verbatim + explicit override, enforced server-side with `fields` + stable `code`; remove `webapp.py:57` default of 100 | **done** (`8cd8af1` + slice 2; server returns `code=budget_override_required`, composer states the cap and needs a tick) |
@@ -18,11 +18,11 @@ This file is the durable memory of the work. Update after every slice.
 | 7 | Delete legacy shell only in slice 9, after green behavioural tests; keep `tests/fixtures/fods_frontend/demo_data.json` | planned (slice 9) |
 | 8 | Copy Docker files; add `RLA_FODS_ALLOW_GEMINI`; run real build or write NOT VERIFIED | planned (slice 9) |
 | A | `abstained`: no new abstention logic; remove from enum/docs unless the answer stage already exposes a flag | **answered:** no flag exists anywhere in `src/` (only the prompt line `tools.py:298`) → removed from the UI enum, no badge, docs unchanged because they never listed it |
-| B | Path leaks: relativise on emit **and** sanitise at the serve layer; old logs replay with identical semantics, only redaction differs; scan test over a fixture copy | planned (slice 3b); the UI already redacts its own fallbacks |
+| B | Path leaks: relativise on emit **and** sanitise at the serve layer; old logs replay with identical semantics, only redaction differs; scan test over a fixture copy | **done** (slice 3b; `EventLog(roots=…)` at emit, `sanitise_paths()` at the serve layer; the UI also redacts its own fallbacks) |
 | C | §6 backend list extended with A-02, A-03, A-07, A-08, A-09, A-11 | **done** — rows 13-18 added, row 12 rewritten |
-| D | A-01 `finally` in `runtime.py` approved; no queue/ordering change; update `test_fods_runtime.py` deliberately | planned (slice 3a) |
+| D | A-01 `finally` in `runtime.py` approved; no queue/ordering change; update `test_fods_runtime.py` deliberately | **done** (slice 3a) |
 | E | Server `?after=<lastSeq>`: add additively if absent | **answered:** already supported at `webapp.py:745` (falls back from `Last-Event-ID`), no server change; the client uses it |
-| F | Markdown renderer: React text nodes only, `http(s)` links only, XSS tests | planned (slice 6) |
+| F | Markdown renderer: React text nodes only, `http(s)` links only, XSS tests | **done** (slice 6; `lib/markdown.js` + `BriefMarkdown.jsx`, no Markdown dependency) |
 | G | "24 tasks" → 26 in design doc examples | **done** (before approval) |
 
 ## Slices
@@ -37,7 +37,7 @@ This file is the durable memory of the work. Update after every slice.
 | 3b | Backend hardening: A-02, A-03, A-07, A-08, A-09, A-11 | **done** (A-03 was slice 3a: `pipeline` + `capabilities.rla_live`) | `feat(backend)` commit | pytest 855+1 · ruff clean · 69 stored logs clean · 7 absolute paths → 0 | - |
 | 4 | Thread lifecycle: working lines, chip, New investigation, Stop | **done** | `feat(ui)` commit | pytest 858+1 · ruff clean · build 25.19 kB css / 282.59 kB js · vitest 137 · Playwright 7 | — |
 | 5 | Answer + evidence: citation chips, scroll, `[C#]` | **done** | `feat(ui)` commit | pytest 859+1 · ruff clean · build 27.94 kB css / 289.60 kB js · vitest 151 · Playwright 8 | — |
-| 6 | Brief overlay | planned | — | |
+| 6 | Brief overlay: rendered Markdown, copy/download, sanitised (UI-10) | **done** | `feat(ui)` commit | pytest 859+1 · ruff clean · build 31.15 kB css / 297.51 kB js · vitest 177 · Playwright 9 | — |
 | 7 | Trace: waterfall, filters, detail, virtualisation, in-chat lines | planned | — | |
 | 8 | Lab: DAG, queue, workers, stacks, playback, RLA phase rail | planned | — | **STOP for review** |
 | 9 | Cleanup, a11y, docs, screenshots, Docker | planned | — | |
@@ -404,6 +404,57 @@ proves every `[P#]`/`[C#]` in both fixture answers resolves, including `[C4]`.
 backend concept cards are tested with a constructed subgraph, not a live provider. Docker on 8765
 still serves the old UI (slice 9). The brief overlay (Markdown rendering, copy/download) is
 slice 6.
+
+## Slice 6 detail (brief overlay, UI-10)
+
+**Files.** Frontend `lib/markdown.js` (new), `thread/BriefMarkdown.jsx` (new),
+`thread/BriefOverlay.jsx` (new), `thread/AnswerCard.jsx`, `thread/Turn.jsx`, `api/client.js`,
+`styles/app.css`, `styles/tokens.css` (`--z-overlay`); tests `lib/markdown.test.js` (new),
+`thread/BriefOverlay.test.jsx` (new), `thread/AnswerCard.test.jsx` (new), `e2e/studio.spec.js`.
+No backend change and no new dependency.
+
+1. **No new tab.** `AnswerCard` hosts an "Open brief" button; `BriefOverlay` is a right-side
+   full-height drawer rendered with `createPortal` into `document.body`, `role="dialog"`,
+   `aria-modal="true"`, labelled by its own heading. The e2e test records
+   `context.on("page")` and asserts zero new pages, and that the URL is unchanged after open and
+   close. Download stays a real `<a href="…/brief?download=1" download>` inside the drawer;
+   Copy uses `navigator.clipboard.writeText` and only shows "Copied" after the promise resolves
+   ("Copy failed" otherwise).
+2. **Markdown is parsed, not injected.** `parseMarkdown()` handles exactly what the two writers
+   emit (design §8 deviation 2, no `react-markdown`): ATX headings, fenced code, rules,
+   blockquotes, ordered/unordered lists, GFM tables, paragraphs, plus inline bold/italic/code,
+   `http(s)` links, bare URLs and `[P#]`/`[C#]` chips. Every block is emitted as React nodes;
+   there is no HTML string anywhere, so file content cannot create elements. The **XSS test**
+   feeds `<script>alert(1)</script>`, `<img src=x onerror=…>`, `[click](javascript:alert(3))`
+   and `<b>` inside a list item and asserts zero `script`/`img` nodes, zero `javascript:` hrefs
+   and the literal text present.
+3. **Honest states.** Loading ("Reading the saved brief…"), 404 → "No saved brief for this run.
+   A brief is written only when citation validation and the evidence check both pass.", other
+   failures (e.g. 413 `brief_too_large`, 500 `brief_unreadable`) show the recorded message in a
+   `role="alert"`. The fetch goes through `api.briefDocument()` (`?format=json`); the raw
+   `api.brief()` text path is untouched.
+4. **Keyboard and scroll.** Esc closes; Tab/Shift+Tab are trapped between the first and last
+   visible controls; focus returns to the button that opened the drawer; `body.overlay-open`
+   (a class, not an inline style) locks page scroll and is removed on unmount.
+5. **Citations stay linked in the brief.** A source line starting `[P#]`/`[C#]` carries
+   `data-source`; clicking a chip in the prose marks and scrolls the matching row
+   (`scrollIntoView({block:"nearest"})`, instant under reduced motion).
+6. **Layout.** The drawer is `min(720px, 100vw)` and full-width under 860 px; the measured
+   overflow at 1280 px and 768 px is 0 for both the document and the drawer, with the body class
+   applied. Screenshots at both widths were reviewed: heading, bold question line, bullets,
+   chips and the wrapped source links all render inside the drawer.
+
+**Slice 6 gate (measured, this worktree):** pytest `859 passed, 1 skipped in 241.35s`
+(unchanged — slice 6 is frontend-only); `ruff check src/ tests/` all checks passed; vite build
+31.15 kB css / 297.51 kB js (was 27.94 / 289.60; +3.21 kB css, +7.91 kB js); vitest
+`177 passed in 17 files` (was 151 in 14; +13 Markdown parser, +10 overlay behaviour,
++3 AnswerCard wiring); Playwright `9 passed (7.6s)` (was 8; +brief drawer, at 768 px, with
+0 CSP violations and 0 console errors); `data/` untouched and `src/fods/web` unchanged.
+
+**Not verified here.** The overlay's clipboard write is unit-tested with a stub; pressing Copy
+in a real browser and checking the OS clipboard was not exercised (the e2e run instead asserts
+the control exists and that the copy path is wired). Docker on 8765 still serves the old UI
+(slice 9).
 
 ## Blockers / notes
 

@@ -79,7 +79,7 @@ export default function Turn({ turn, onOpenTrace }) {
           </div>
         ) : null}
 
-        {turn.answer && <AnswerCard answer={turn.answer} />}
+        {turn.answer && <AnswerCard answer={turn.answer} runId={turn.id} />}
 
         {turn.stream === "error" && (
           <p className="turn-note" role="status">

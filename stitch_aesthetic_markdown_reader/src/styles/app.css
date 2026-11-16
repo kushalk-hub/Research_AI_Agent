@@ -844,6 +844,13 @@
   font-size: var(--fs-2);
 }
 
+.answer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
 @media (max-width: 1279px) {
   .answer-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -852,6 +859,236 @@
   .evidence-list {
     max-height: 280px;
   }
+}
+
+/* ---------- Brief overlay (UI-10) ---------- */
+
+/* The saved brief is read in place: a right-side drawer over the thread, never
+   a raw Markdown tab. Scrolling is locked with a body class, so nothing has to
+   set an inline style (CSP). */
+
+.overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: flex;
+  justify-content: flex-end;
+  background: var(--overlay);
+  animation: overlay-fade var(--t-fast) var(--ease);
+}
+
+.brief-dialog {
+  display: flex;
+  width: min(720px, 100vw);
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  border-left: 1px solid var(--line-strong);
+  background: var(--surface);
+  box-shadow: var(--elev-2);
+  animation: brief-slide var(--t-base) var(--ease);
+}
+
+.brief-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.brief-dialog-title {
+  margin: 0;
+  margin-right: auto;
+  font-size: var(--fs-4);
+  line-height: var(--lh-4);
+}
+
+.brief-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.brief-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-4);
+}
+
+.brief-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-2);
+  line-height: var(--lh-3);
+}
+
+.brief-markdown {
+  color: var(--ink);
+  font-family: var(--font-reading);
+  font-size: var(--fs-3);
+  line-height: var(--lh-3);
+  overflow-wrap: anywhere;
+}
+
+.brief-markdown > :first-child {
+  margin-top: 0;
+}
+
+.brief-markdown h1,
+.brief-markdown h2,
+.brief-markdown h3,
+.brief-markdown h4 {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-family: var(--font-ui);
+  line-height: var(--lh-3);
+}
+
+.brief-markdown h1 {
+  font-size: var(--fs-5);
+}
+
+.brief-markdown h2 {
+  font-size: var(--fs-4);
+}
+
+.brief-markdown h3,
+.brief-markdown h4 {
+  font-size: var(--fs-3);
+}
+
+.brief-markdown p {
+  margin: 0 0 var(--sp-3);
+}
+
+.brief-markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.brief-markdown blockquote {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.brief-markdown blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.brief-markdown code {
+  padding: 1px 4px;
+  border-radius: var(--r-1);
+  background: var(--surface-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2);
+}
+
+.brief-code {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+
+.brief-code code {
+  padding: 0;
+  background: none;
+}
+
+.brief-rule {
+  margin: var(--sp-4) 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.brief-list {
+  margin: 0 0 var(--sp-3);
+  padding-left: var(--sp-5);
+}
+
+.brief-list li {
+  margin-bottom: var(--sp-1);
+  border-radius: var(--r-1);
+}
+
+/* The source list mirrors the answer's evidence cards: selecting a chip tints
+   and scrolls to the matching `[P#]`/`[C#]` row. */
+.brief-list li[data-source] {
+  scroll-margin-block: var(--sp-3);
+  transition: background var(--t-fast) var(--ease);
+}
+
+.brief-list li[data-active="true"] {
+  background: var(--accent-weak);
+}
+
+.brief-table-wrap {
+  margin: var(--sp-3) 0;
+  overflow-x: auto;
+}
+
+.brief-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-ui);
+  font-size: var(--fs-2);
+}
+
+.brief-table th,
+.brief-table td {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.brief-table th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+/* A brief has to be readable at 768 px without sideways page scroll; the
+   drawer fills the viewport and long tokens wrap rather than push it wider. */
+@media (max-width: 860px) {
+  .brief-dialog {
+    width: 100vw;
+    border-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-backdrop,
+  .brief-dialog {
+    animation: none;
+  }
+}
+
+@keyframes overlay-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes brief-slide {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+/* Scroll lock while the drawer is open (set by BriefOverlay, not inline). */
+body.overlay-open {
+  overflow: hidden;
 }
 
 .worked-for {

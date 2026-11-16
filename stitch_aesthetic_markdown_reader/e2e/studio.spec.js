@@ -184,6 +184,58 @@ test("citation chips resolve to evidence and highlight in both directions", asyn
   expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
 });
 
+test("the saved brief opens in a drawer, never a raw Markdown tab", async ({ page }) => {
+  const consoleErrors = await watch(page);
+  const extraPages = [];
+  page.context().on("page", (opened) => extraPages.push(opened));
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /run the deterministic demo/i }).click();
+
+  const article = page.getByRole("article");
+  await expect(article.getByLabel("Status: Completed")).toBeVisible({ timeout: 30_000 });
+  const urlBefore = page.url();
+
+  await article.getByRole("button", { name: "Open brief" }).click();
+  const dialog = page.getByRole("dialog", { name: "Research brief" });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByRole("heading", { level: 1, name: /evidence-backed brief/i }),
+  ).toBeVisible();
+  await expect(dialog.getByRole("link", { name: /download \.md/i })).toHaveAttribute(
+    "href",
+    /\/brief\?download=1$/,
+  );
+
+  // The drawer has to fit the narrow layout too: same content, no sideways scroll.
+  await page.setViewportSize({ width: 768, height: 900 });
+  await expect(page.locator("body")).toHaveClass(/overlay-open/);
+  const overflow = await page.evaluate(() => {
+    const panel = document.querySelector(".brief-dialog");
+    return {
+      root: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      dialog: panel ? panel.scrollWidth - panel.clientWidth : 0,
+    };
+  });
+  expect(overflow.root).toBeLessThanOrEqual(0);
+  expect(overflow.dialog).toBeLessThanOrEqual(0);
+
+  await dialog.locator('.cite-chip[data-citation="P2"]').first().click();
+  await expect(dialog.locator('.brief-list li[data-source="P2"]')).toHaveAttribute(
+    "data-active",
+    "true",
+  );
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  expect(page.url()).toBe(urlBefore);
+  expect(extraPages).toHaveLength(0);
+  await expect(article.getByRole("button", { name: "Open brief" })).toBeFocused();
+
+  expect(await cspViolations(page)).toEqual([]);
+  expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
+});
+
 for (const width of [1280, 768]) {
   test(`no horizontal page scroll at ${width}px`, async ({ page }) => {
     const consoleErrors = await watch(page);
