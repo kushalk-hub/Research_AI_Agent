@@ -184,6 +184,90 @@ test("citation chips resolve to evidence and highlight in both directions", asyn
   expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
 });
 
+test("the trace table is virtualised, filterable and keyboard navigable", async ({ page }) => {
+  const consoleErrors = await watch(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /run the deterministic demo/i }).click();
+
+  const article = page.getByRole("article");
+  await expect(article.getByLabel("Status: Completed")).toBeVisible({ timeout: 30_000 });
+  await article.getByRole("button", { name: /open execution trace/i }).click();
+
+  const list = page.getByRole("region", { name: /recorded events/i });
+  await expect(list).toBeVisible();
+  await expect(page.getByText("114 of 114 events")).toBeVisible();
+
+  // A 114-event run must not put 114 rows in the DOM.
+  const rows = page.locator(".trace-row");
+  await expect(rows.first()).toBeVisible();
+  const rendered = await rows.count();
+  expect(rendered).toBeGreaterThan(0);
+  expect(rendered).toBeLessThan(114);
+  expect(rendered).toBeLessThanOrEqual(60);
+
+  // Fixed 32 px rows, and the header stays put when the body scrolls.
+  const rowHeight = await rows.first().evaluate((row) => row.getBoundingClientRect().height);
+  expect(rowHeight).toBe(32);
+  const sticky = await page.evaluate(() => {
+    const scroll = document.querySelector(".trace-scroll");
+    scroll.scrollTop = 400;
+    const head = document.querySelector(".trace-table thead th");
+    return {
+      scrollTop: scroll.scrollTop,
+      scrollY: Math.round(scroll.getBoundingClientRect().top),
+      headY: Math.round(head.getBoundingClientRect().top),
+    };
+  });
+  expect(sticky.scrollTop).toBeGreaterThan(0);
+  expect(sticky.headY).toBeGreaterThanOrEqual(sticky.scrollY - 1);
+  expect(sticky.headY).toBeLessThanOrEqual(sticky.scrollY + 1);
+  await page.evaluate(() => {
+    document.querySelector(".trace-scroll").scrollTop = 0;
+  });
+  await expect(page.getByRole("button", { name: /Select event 1:/ })).toBeVisible();
+
+  // Row select → the detail pane opens on Summary.
+  await rows.first().click();
+  const detail = page.getByRole("complementary", { name: "Event detail" });
+  await expect(detail.getByRole("heading", { name: "Event #1" })).toBeVisible();
+  await expect(detail.getByRole("tab", { name: "Summary" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await expect(detail).toContainText("FODS research run started");
+
+  // ↑/↓/Home/End move the selection, and the pane follows.
+  await list.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(detail.getByRole("heading", { name: "Event #2" })).toBeVisible();
+  await page.keyboard.press("End");
+  await expect(detail.getByRole("heading", { name: "Event #114" })).toBeVisible();
+  await page.keyboard.press("Home");
+  await expect(detail.getByRole("heading", { name: "Event #1" })).toBeVisible();
+
+  // Class filter, then "failures only" on a run with no failures.
+  const queueChip = page.locator('.trace-class-chip[data-class="queue"]');
+  await queueChip.click();
+  await expect(page.getByText("40 of 114 events")).toBeVisible();
+  await queueChip.click();
+  await page.getByLabel("Failures only").check();
+  await expect(page.getByText(/No events match these filters/)).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page.getByText("114 of 114 events")).toBeVisible();
+
+  // The stacked layout must not create sideways page scroll.
+  await page.setViewportSize({ width: 768, height: 900 });
+  const overflow = await page.evaluate(() => ({
+    root: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    body: document.body.scrollWidth - document.body.clientWidth,
+  }));
+  expect(overflow.root).toBeLessThanOrEqual(0);
+  expect(overflow.body).toBeLessThanOrEqual(0);
+
+  expect(await cspViolations(page)).toEqual([]);
+  expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
+});
+
 test("the saved brief opens in a drawer, never a raw Markdown tab", async ({ page }) => {
   const consoleErrors = await watch(page);
   const extraPages = [];

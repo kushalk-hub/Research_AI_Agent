@@ -14,7 +14,7 @@ This file is the durable memory of the work. Update after every slice.
 | 3 | `vitest`, `@testing-library/react`, `jsdom` pinned; Playwright dev-only via `npm run test:e2e`, never in Docker | done (slice 1; exact pins, licence-clean) |
 | 4 | RLA cooperative cancel, minimal diff; stop and ask if invasive | **done** (slice 4; the diff stays in `webapp._execute_research_pipeline`, `src/rla` untouched) |
 | 5 | Budget = configured cap verbatim + explicit override, enforced server-side with `fields` + stable `code`; remove `webapp.py:57` default of 100 | **done** (`8cd8af1` + slice 2; server returns `code=budget_override_required`, composer states the cap and needs a tick) |
-| 6 | Backend one-liners + single `describeEvent()` fallback; redacted, ≤90 chars, no raw JSON/paths | **done backend** (`fods/event_meta.py`; frontend fallback is slice 7) |
+| 6 | Backend one-liners + single `describeEvent()` fallback; redacted, ≤90 chars, no raw JSON/paths | **done** (`fods/event_meta.py` in slice 3a; the UI fallback and the `payload.tool` phase rule are slice 7) |
 | 7 | Delete legacy shell only in slice 9, after green behavioural tests; keep `tests/fixtures/fods_frontend/demo_data.json` | planned (slice 9) |
 | 8 | Copy Docker files; add `RLA_FODS_ALLOW_GEMINI`; run real build or write NOT VERIFIED | planned (slice 9) |
 | A | `abstained`: no new abstention logic; remove from enum/docs unless the answer stage already exposes a flag | **answered:** no flag exists anywhere in `src/` (only the prompt line `tools.py:298`) → removed from the UI enum, no badge, docs unchanged because they never listed it |
@@ -38,7 +38,7 @@ This file is the durable memory of the work. Update after every slice.
 | 4 | Thread lifecycle: working lines, chip, New investigation, Stop | **done** | `feat(ui)` commit | pytest 858+1 · ruff clean · build 25.19 kB css / 282.59 kB js · vitest 137 · Playwright 7 | — |
 | 5 | Answer + evidence: citation chips, scroll, `[C#]` | **done** | `feat(ui)` commit | pytest 859+1 · ruff clean · build 27.94 kB css / 289.60 kB js · vitest 151 · Playwright 8 | — |
 | 6 | Brief overlay: rendered Markdown, copy/download, sanitised (UI-10) | **done** | `feat(ui)` commit | pytest 859+1 · ruff clean · build 31.15 kB css / 297.51 kB js · vitest 177 · Playwright 9 | — |
-| 7 | Trace: waterfall, filters, detail, virtualisation, in-chat lines | planned | — | |
+| 7 | Trace: waterfall, filters, detail, virtualisation, in-chat lines | **done** | `feat(ui)` commit | pytest 859+1 · ruff clean · build 39.73 kB css / 312.64 kB js · vitest 205 · Playwright 10 | — |
 | 8 | Lab: DAG, queue, workers, stacks, playback, RLA phase rail | planned | — | **STOP for review** |
 | 9 | Cleanup, a11y, docs, screenshots, Docker | planned | — | |
 
@@ -455,6 +455,66 @@ No backend change and no new dependency.
 in a real browser and checking the OS clipboard was not exercised (the e2e run instead asserts
 the control exists and that the copy path is wired). Docker on 8765 still serves the old UI
 (slice 9).
+
+## Slice 7 detail (execution trace, UI-11)
+
+**Files.** Frontend `lib/trace.js` (new), `views/TraceDetail.jsx` (new), `views/TraceView.jsx`
+(rewritten), `lib/events.js` (phase fallback only), `styles/app.css`; tests
+`lib/trace.test.js` (new), `views/TraceView.test.jsx` (new), `views/views.test.jsx`,
+`lib/events.test.js`, `e2e/studio.spec.js`. No backend change and no new dependency.
+
+1. **The audit's bug is gone.** The old trace read `event.phase`, which never existed, and every
+   RLA row said `research_progress`. `phaseOf()` now reads `payload.phase` for RLA, and for FODS
+   maps `payload.tool` exactly like `fods/event_meta.py:TOOL_PHASE` (`search_*` →
+   acquire, `retrieve_evidence` → evidence, `draft_cited_answer` → answer,
+   `validate_citations` → validate, `write_cited_brief` → write); plan/queue/task/stack/tool are
+   runtime. On the golden logs that yields 11 distinct phases for `efee736eb669` (RLA) and 9 for
+   `17ee03228c0b` / `Q01-deep` (FODS), not one.
+2. **Rows and classes are derived once.** `traceRows()` produces `{phase, class, severity,
+   summary, durationMs, offsetMs}`; recorded backend fields win and the fallbacks mirror
+   `event_meta.py`. Summaries still come from the shared `describeEvent()`, so the trace and the
+   in-chat lines cannot drift (design §5.1). Every row in all three golden logs has a non-empty
+   summary of ≤90 characters (tested).
+3. **Waterfall.** `t0` is the earliest recorded timestamp; offset = `ts − t0`; the bar width is
+   `duration_ms` where recorded and a 2 px tick otherwise. `duration_ms` is read only from
+   `event.duration_ms` / `payload.duration_ms`; `run_finished.elapsed_ms` feeds the summary bar
+   only. The RLA log has no durations (0/55) and its `elapsed_ms` is `null`, so it reads
+   “duration not recorded”, not zero. Scale is fit / 10 s / 1 s; fit ends at the last recorded
+   moment + its duration.
+4. **Virtualisation that respects the CSP.** The viewport is
+   `clamp(280px, 46vh, 480px)`, rows are 32 px, and the window is the visible range ±10 rows
+   (`virtualWindow()`). The spacers and each bar's `left`/`width` are written with
+   `style.setProperty("--pad-top"/"--pad-bottom"/"--bar-left"/"--bar-width", …)`; no inline
+   `style` attribute is emitted. Measured on the 114-event demo: 23 `.trace-row` nodes at
+   1280 px (33 after scrolling), and the 381-event log stays at 25. There is no Prev/Next
+   stepper.
+5. **Filters and grouping.** Text search (summary/phase/class/kind/seq), multi-select class
+   chips, multi-select status chips (Info/OK/Warn/Failed), a “Failures only” shortcut, and
+   “Group by phase” with collapsible groups. Empty results state “No events match these
+   filters” and offer “Clear filters”. Keyboard ↑/↓/Home/End moves the selection through the
+   rows that are actually rendered (a collapsed group is skipped), and the selected row scrolls
+   into the ±10 overscan window.
+6. **Detail pane.** Summary / Payload (JSON, collapsed) / Timing (start offset, recorded
+   duration, gap since the previous event) / Related (same recorded task, provider or paper id,
+   each a jump link that clears the filters hiding it). An absent duration says “not recorded”;
+   an absent payload says so instead of showing `{}`.
+7. **Layout.** At ≥1280 px the table and the 300 px detail pane sit side by side; below that the
+   detail stacks under the table. Sticky header and 32 px rows were measured directly (header
+   top stays at the scroll container's top after `scrollTop = 500`). Zero horizontal overflow
+   was measured at 1280 px and 768 px, both for the page and inside the table; screenshots at
+   both widths were reviewed.
+
+**Slice 7 gate (measured, this worktree):** pytest `859 passed, 1 skipped in 233.45s`
+(unchanged — slice 7 is frontend-only); `ruff check src/ tests/` all checks passed; vite build
+39.73 kB css / 312.64 kB js (was 31.15 / 297.51; +8.58 kB css, +15.13 kB js); vitest
+`205 passed in 19 files` (was 177 in 17; +16 trace model over the three golden logs, +11 trace
+view, +1 phase fallback); Playwright `10 passed (8.4s)` (was 9; +virtualised trace, sticky
+header, keyboard, filters, failures-only, 768 px overflow, 0 CSP violations, 0 console errors);
+`data/` untouched and `src/fods/web` / `src/fods/templates` unchanged.
+
+**Not verified here.** No live RLA run on this machine (`GEMINI_API_KEY` absent), so the trace
+was exercised against the committed RLA log rather than a fresh live stream. Docker on 8765
+still serves the old UI (slice 9).
 
 ## Blockers / notes
 

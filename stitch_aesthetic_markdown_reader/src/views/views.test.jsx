@@ -43,12 +43,17 @@ describe("LabView", () => {
 });
 
 describe("TraceView", () => {
-  it("renders recorded events oldest first with kind and phase", () => {
+  it("renders recorded events oldest first as table rows", () => {
     render(<TraceView run={run} onFocusComposer={() => {}} />);
     const rows = screen.getAllByRole("row");
     expect(rows).toHaveLength(3); // header + two events
-    expect(within(rows[1]).getByText("plan_validated")).toBeTruthy();
+    expect(within(rows[1]).getByText("plan validated")).toBeTruthy();
+    expect(within(rows[1]).getAllByText("plan")).toHaveLength(2); // phase + class
     expect(within(rows[2]).getByText("search_alpha started")).toBeTruthy();
+    expect(within(rows[2]).getByText("runtime")).toBeTruthy();
+    expect(within(rows[2]).getByText("task")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /previous event/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /next event/i })).toBeNull();
   });
 
   it("offers a start action when no run is open", () => {

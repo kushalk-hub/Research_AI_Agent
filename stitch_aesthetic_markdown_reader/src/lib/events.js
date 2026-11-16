@@ -135,23 +135,50 @@ export function modeShort(mode) {
   return "Unknown";
 }
 
-/** Phase of an event, from the recorded field or the event kind. */
+/** Tool name -> trace phase, mirroring `fods/event_meta.py:TOOL_PHASE`. */
+const TOOL_PHASE = Object.freeze({
+  search_: "acquire",
+  acquisition_checkpoint: "acquire",
+  merge_and_save_context: "merge",
+  load_saved_context: "merge",
+  retrieve_evidence: "evidence",
+  draft_cited_answer: "answer",
+  validate_citations: "validate",
+  write_cited_brief: "write",
+});
+
+const PLAN_KINDS = new Set([
+  "research_query_plan",
+  "plan_received",
+  "plan_repaired",
+  "plan_validated",
+  "plan_rejected",
+]);
+const QUEUE_KINDS = new Set([
+  "task_ready",
+  "queue_updated",
+  "task_dequeued",
+  "dependency_updated",
+]);
+
+/** Phase of an event, from the recorded field or the event kind.
+ *
+ *  Design §5: the phase is a fact about the record, not a guess from `kind`.
+ *  RLA events carry `payload.phase`; FODS events carry the tool that ran, and
+ *  the tool decides the phase. `plan`, `queue`, `task`, `stack`, `tool` and
+ *  everything else are runtime — the backend's `phase_for()` says the same. */
 export function phaseOf(event) {
   const payload = event?.payload || {};
   if (typeof payload.phase === "string" && payload.phase) return payload.phase;
+  const tool = typeof payload.tool === "string" ? payload.tool : "";
+  if (tool) {
+    for (const [needle, phase] of Object.entries(TOOL_PHASE)) {
+      if (tool === needle || (needle.endsWith("_") && tool.startsWith(needle))) return phase;
+    }
+  }
   const kind = String(event?.kind || "");
-  if (kind.startsWith("plan") || kind.startsWith("research_query")) return "plan";
-  if (kind.startsWith("queue") || kind === "task_ready" || kind === "task_dequeued") return "queue";
-  if (kind.startsWith("task")) return "task";
-  if (kind.startsWith("tool")) return "tool";
-  if (kind.startsWith("stack")) return "stack";
-  if (kind.startsWith("model")) return "model";
-  if (kind.includes("source")) return "source";
-  if (kind.includes("evidence")) return "evidence";
-  if (kind.includes("answer")) return "answer";
-  if (kind.includes("citation") || kind.includes("validation")) return "validation";
-  if (kind === "brief_saved") return "output";
-  if (kind === "run_started" || kind === "run_finished" || kind === "run_failed") return "runtime";
+  if (PLAN_KINDS.has(kind)) return "plan";
+  if (QUEUE_KINDS.has(kind)) return "queue";
   return "runtime";
 }
 

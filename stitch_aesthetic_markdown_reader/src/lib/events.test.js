@@ -96,7 +96,15 @@ describe("phaseOf", () => {
   it("uses the recorded phase before guessing from the kind", () => {
     expect(phaseOf({ kind: "task_started", payload: { phase: "write" } })).toBe("write");
     expect(phaseOf({ kind: "queue_updated" })).toBe("queue");
-    expect(phaseOf({ kind: "citation_validation" })).toBe("validation");
+    expect(phaseOf({ kind: "citation_validation" })).toBe("runtime");
+  });
+
+  it("derives a FODS phase from the tool that ran, as the backend does", () => {
+    expect(phaseOf({ kind: "task_started", payload: { tool: "search_arxiv" } })).toBe("acquire");
+    expect(phaseOf({ kind: "tool_call_started", payload: { tool: "retrieve_evidence" } })).toBe(
+      "evidence",
+    );
+    expect(phaseOf({ kind: "task_started" })).toBe("runtime");
   });
 
   it("labels known phases and humanises unknown ones", () => {
