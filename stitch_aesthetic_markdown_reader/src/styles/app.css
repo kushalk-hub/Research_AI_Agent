@@ -735,6 +735,264 @@
   font-size: var(--fs-2);
 }
 
+/* A blocked mode is a state, not an error the user caused: warn, not err. */
+.composer-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-2);
+  background: var(--warn-weak);
+  color: var(--warn);
+  font-size: var(--fs-2);
+}
+
+.composer-note strong {
+  font-weight: 650;
+}
+
+/* ---------- Composer + menu ---------- */
+
+.composer-tools {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  align-self: flex-end;
+}
+
+.composer-plus {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-2);
+  color: var(--muted);
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.composer-plus:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.composer-plus[aria-expanded="true"] {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+.composer-plus[aria-expanded="true"] svg {
+  transform: rotate(45deg);
+}
+
+.composer-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + var(--sp-2));
+  width: min(420px, calc(100vw - 3 * var(--content-gutter)));
+  max-height: min(70vh, 620px);
+  overflow-y: auto;
+  padding: var(--sp-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  background: var(--surface);
+  box-shadow: var(--elev-2);
+  z-index: var(--z-popover);
+}
+
+.popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.popover-title {
+  font-size: var(--fs-4);
+  line-height: var(--lh-4);
+}
+
+.popover-section {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+
+.popover-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-1);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.popover-note {
+  color: var(--muted);
+  font-size: var(--fs-1);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.mode-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-2);
+  cursor: pointer;
+}
+
+.mode-option:hover {
+  background: var(--surface-2);
+}
+
+.mode-option input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.mode-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mode-copy strong {
+  font-size: var(--fs-3);
+  font-weight: 600;
+}
+
+.mode-copy span {
+  color: var(--muted);
+  font-size: var(--fs-1);
+  line-height: var(--lh-2);
+}
+
+.config-rows {
+  display: grid;
+  gap: var(--sp-1);
+}
+
+.config-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: var(--sp-2);
+  font-size: var(--fs-2);
+  line-height: var(--lh-2);
+}
+
+.config-row dt {
+  color: var(--muted);
+}
+
+.config-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.popover-input {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-2);
+}
+
+.popover-input:focus-visible {
+  border-color: var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.accordion-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-1) 0;
+  color: var(--ink);
+  font-size: var(--fs-2);
+  font-weight: 600;
+}
+
+.accordion-toggle svg {
+  transition: transform var(--t-fast) var(--ease);
+}
+
+.accordion-toggle svg[data-open="false"] {
+  transform: rotate(-90deg);
+}
+
+.advanced-grid {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.field label {
+  font-size: var(--fs-2);
+  font-weight: 560;
+}
+
+.field input[type="number"] {
+  width: 132px;
+  min-height: 30px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--fs-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.field input[aria-invalid="true"] {
+  border-color: var(--err);
+}
+
+.override-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  font-size: var(--fs-1);
+  line-height: var(--lh-2);
+}
+
+.override-check input {
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.field-error {
+  margin-top: var(--sp-1);
+  color: var(--err);
+  font-size: var(--fs-1);
+  line-height: var(--lh-2);
+}
+
+.field-error[data-tone="warn"] {
+  color: var(--warn);
+}
+
 /* ---------- Tables (Trace / Library) ---------- */
 
 .panel {

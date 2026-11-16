@@ -11,9 +11,9 @@ This file is the durable memory of the work. Update after every slice.
 |---|---|---|
 | 1 | Separate worktree + new branch; own venv; `main` staging untouched | done (`D:\fods-studio-redesign`, venv at `.venv`) |
 | 2 | UI-07 = option (a) labelled phase graph + "Run the deterministic demo" chip in the empty thread | planned (slice 8 + slice 1) |
-| 3 | `vitest`, `@testing-library/react`, `jsdom` pinned; Playwright dev-only via `npm run test:e2e`, never in Docker | planned (slice 1) |
+| 3 | `vitest`, `@testing-library/react`, `jsdom` pinned; Playwright dev-only via `npm run test:e2e`, never in Docker | done (slice 1; exact pins, licence-clean) |
 | 4 | RLA cooperative cancel, minimal diff; stop and ask if invasive | planned (slice 4) |
-| 5 | Budget = configured cap verbatim + explicit override, enforced server-side with `fields` + stable `code`; remove `webapp.py:57` default of 100 | planned (slice 2 + 3a) |
+| 5 | Budget = configured cap verbatim + explicit override, enforced server-side with `fields` + stable `code`; remove `webapp.py:57` default of 100 | **done** (`8cd8af1` + slice 2; server returns `code=budget_override_required`, composer states the cap and needs a tick) |
 | 6 | Backend one-liners + single `describeEvent()` fallback; redacted, ≤90 chars, no raw JSON/paths | planned (slice 3a + 7) |
 | 7 | Delete legacy shell only in slice 9, after green behavioural tests; keep `tests/fixtures/fods_frontend/demo_data.json` | planned (slice 9) |
 | 8 | Copy Docker files; add `RLA_FODS_ALLOW_GEMINI`; run real build or write NOT VERIFIED | planned (slice 9) |
@@ -32,7 +32,7 @@ This file is the durable memory of the work. Update after every slice.
 | 0 | Step 1: worktree, baseline, citation spot-check, fixtures | **done** — see `BASELINE.md` | Step 1 commit | pytest 808 passed / 1 skipped · ruff clean · build green |
 | 1 | Foundation: tokens, theme, shell (sidebar/thread/composer), store, SSE manager | **done, accepted** | `dcad428` | pytest 809+1 · ruff clean · build green · vitest 43 · Playwright 2 | reviewed |
 | 1.1 | Owner review fixes: neutral copy, footer, shared column, e2e isolation, contrast, 768 layout, N-shortcut, recents, CSP assertion | **done** | `fix(ui)` commit | pytest 813+1 · ruff clean · build green · vitest 83 · Playwright 4 | — |
-| 2 | Composer `+` menu, mode, config, advanced validation, budget | in progress | — | | |
+| 2 | Composer `+` menu, mode, config, advanced validation, budget | **done** | `feat(ui)` commit | pytest 817+1 · ruff clean · build 24.15 kB css / 275.99 kB js · vitest 112 · Playwright 5 | — |
 | 3a | Backend for UI: enrichment, `pipeline`, status, terminal guarantee, brief JSON, codes | planned | — | |
 | 3b | Backend hardening: A-02, A-03, A-07, A-08, A-09, A-11 | planned | — | |
 | 4 | Thread lifecycle: working lines, chip, New investigation, Stop | planned | — | |
@@ -129,6 +129,57 @@ now returns `limits` (the `NewRun` bounds) and `capabilities` (`ollama_planner`,
 field error unless `allow_budget_override` is set; history rows carry `started_at`/`ended_at`.
 `tests/test_fods_webapp.py`: 14 passed.
 
+## Slice 2 detail (composer `+` menu)
+
+**Files.** `src/composer/model.js` (pure rules, no React), `src/composer/ComposerMenu.jsx` (the
+popover), rewritten `src/composer/Composer.jsx`, `composer` slice in `src/store/reducer.js`,
+`--z-popover` + popover/field/config styles.
+
+1. **The menu has the four sections the owner specified**, in order: *Execution mode* (Live /
+   Deterministic demo with a one-line description each), *Agent configuration* (read-only
+   planner/structured/answer/embedding model ids, enabled sources, daily cap — all from
+   `/api/config`), *Topic label* (optional; blank derives the label from the question and shows
+   the derived value as the placeholder), *Advanced* (collapsed by default).
+2. **No known-to-fail default path.** `defaultMode(config)` returns `demo` unless
+   `capabilities.rla_live` is true, so the first send is a run that works. `liveBlocker(config)`
+   returns the actual cause: *"Live runs need an Ollama planner. This runtime is configured for
+   gemini/gemini-2.5-flash."* or *"Live runs need GEMINI_API_KEY, and this runtime does not have
+   one."* Choosing Live anyway disables send (title repeats the reason), shows a warn-tone inline
+   note, and offers **Run as deterministic demo** in one click.
+3. **A-06 is structural, not a hint.** Untouched advanced fields are **omitted** from the POST, so
+   the runtime default applies unchanged; only edited fields are sent. `allow_budget_override` is
+   sent only when a value above the configured cap is explicitly ticked, and the checkbox text
+   names the cap (`Allow 40 requests for this run, above the configured cap of 15`). The server
+   already rejects an over-cap request with `code=budget_override_required` and a field error.
+4. **Displayed defaults equal what the runtime will use if the field is omitted**, each labelled
+   with its source: budget *15 · from /api/config*, everything else *20 / 300 / 3 / 3 · runtime
+   default*. This is the UI-04 requirement — the old accordion showed a hardcoded 100.
+5. **Validation is local *and* server-mapped.** Local validation mirrors `NewRun` bounds and runs
+   on every keystroke, so `0` budget blocks submit with a visible message and **no POST**. A 400
+   whose `fields` names an input renders the message next to that input *and* repeats it in the
+   alert as `field: message`, so a field inside the closed menu is never silently dropped.
+6. **Bounds cannot drift silently.** `tests/test_fods_composer_bounds.py` parses the JS `LIMITS`
+   table and compares all 16 bounds to `fods.webapp.NewRun`'s pydantic metadata, and asserts the
+   set of keys is exactly the mapped set. At runtime the UI still prefers `/api/config.limits`.
+7. **Keyboard and focus.** Opens with focus on the checked mode; `Tab`/`Shift+Tab` cycle inside;
+   `Escape` closes and returns focus to `+`; `Ctrl/Cmd+.` toggles from anywhere; a pointer down
+   outside closes. `aria-haspopup="dialog"`, `aria-expanded`, `aria-controls` on the trigger, and
+   `role="dialog"` with a label.
+8. **Layout.** The popover is 420 px wide capped at `100vw − 3 gutters`, `max-height: min(70vh,
+   620px)` and scrolls; expanding Advanced scrolls the fields into view (found missing in the
+   first 1280 capture). Zero horizontal overflow measured with the menu open at 1280 and 768.
+
+**Slice 2 gate (measured):** pytest `817 passed, 1 skipped in 202.82s` (was 813+1; +4 bounds
+tests); `ruff check src/ tests/` all checks passed; vite build 1602 modules, 0.97 kB html /
+**24.15 kB** css / **275.99 kB** js; vitest **112 passed in 11 files** (was 83 in 9; +11 composer
+component tests, +10 model tests, +3 reducer tests, and App tests updated for the new default
+mode); Playwright **5 passed (3.2s)**. Screenshot run: `consoleErrors: []`,
+`cspViolations: []`, `overflow {root:0, body:0}` at 1280 and 768, also with the menu open.
+
+**Evidence:** `docs/audit/screenshots/slice2-menu-{1280,768}.png`,
+`slice2-menu-advanced-1280.png`, `slice2-menu-advanced-light-1280.png`; the four slice-1.1
+screenshots were regenerated because the composer gained the `+` trigger.
+
 ## Blockers / notes
 
 - `dist/` is **not** tracked and is gitignored (`.gitignore:18`); the build output is produced by
@@ -142,4 +193,5 @@ field error unless `allow_budget_override` is set; history rows carry `started_a
   never touched. After slice 1.1 the e2e/screenshot path uses a throwaway `RLA_DATA_DIR`, so a
   normal gate run adds nothing.
 - The Docker container on 8765 still serves the **old** UI. Slice 9 rebuilds it; until then the
-  new shell is only on `fods serve` from this worktree.
+  new shell is only on `fods serve` from this worktree. For slice 9's dev loop, `FODS_API_PORT`
+  selects the Vite proxy target (`8765` is the container; e2e/screenshots use `8901`).

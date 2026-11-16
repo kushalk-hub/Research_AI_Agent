@@ -328,7 +328,7 @@ produce tool-call durations).
 | 11 | Validation shape | keep `fields`; add stable `code` strings per error | UI-04, A-12 |
 | 12 | Path hygiene | workspace-absolute paths relativised before emit **and** one shared sanitiser at the serve layer (SSE, history, brief, replay). Old logs replay with identical semantics; only path redaction differs | A-11 |
 | 13 | Stream fallback + handle lifetime | `/api/runs/<id>/events` streams from disk when no live handle exists; `retry: 3000`; finished handles are evicted | A-02 |
-| 14 | Capability discovery | `/api/config.capabilities.ollama_planner`; the UI disables FODS-live with a stated reason when `false` | A-03 |
+| 14 | Capability discovery | `/api/config.capabilities.{ollama_planner,gemini,rla_live}` plus `limits` (the `NewRun` bounds) and `providers`; the UI disables live with a stated reason and defaults to the deterministic demo when `rla_live` is `false` | A-03, UI-02 |
 | 15 | Honest citation flag | `citations_validated = not stripped_citations`; neutral "N selected" badge | A-07 |
 | 16 | Brief robustness | try/except around the brief read, 2 MiB cap | A-08 |
 | 17 | Tolerant log reads + cached history | `read_events` skips corrupt lines; history index cached by path/mtime/size | A-09 |

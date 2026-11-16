@@ -55,9 +55,26 @@ beforeEach(() => {
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
   vi.spyOn(api, "config").mockResolvedValue({
+    models: {
+      planner: "ollama/qwen3:4b",
+      structured: "ollama/qwen3:4b",
+      answer: "gemini/gemini-2.5-flash",
+      embedding: "ollama/nomic-embed-text",
+    },
+    providers: { planner: "ollama", structured: "ollama", answer: "gemini", embedding: "ollama" },
     llm_request_budget: 15,
+    paper_limit: 20,
+    paper_limit_max: 20,
+    provider_wait_seconds: 300,
     gemini_key_configured: true,
+    gemini_opted_in: false,
     modes: ["live", "simulate", "replay"],
+    capabilities: {
+      ollama_planner: true,
+      gemini: true,
+      gemini_opted_in: false,
+      rla_live: true,
+    },
   });
   vi.spyOn(api, "history").mockResolvedValue({ runs: [] });
   vi.spyOn(api, "contexts").mockResolvedValue({ contexts: [] });

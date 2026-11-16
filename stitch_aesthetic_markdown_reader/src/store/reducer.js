@@ -18,6 +18,22 @@ export const initialState = {
   page: "research",
   theme: "system", // system | light | dark
   error: null, // { message, code, fields }
+
+  /* composer state (per session, survives navigation) */
+  composer: {
+    mode: null, // null = follow live availability; "live" | "demo"
+    topic: "", // "" = derive from the question
+    menuOpen: false,
+    advancedOpen: false,
+    overrides: {
+      paper_limit: null,
+      provider_wait_seconds: null,
+      llm_request_budget: null,
+      concurrency: null,
+      source_limit: null,
+    },
+    allowBudgetOverride: false,
+  },
 };
 
 function upsertOrder(order, runId) {
@@ -110,6 +126,66 @@ export function reducer(state, action) {
 
     case "ui/theme":
       return { ...state, theme: action.theme };
+
+    case "composer/mode":
+      return {
+        ...state,
+        composer: { ...state.composer, mode: action.mode, menuOpen: false },
+      };
+
+    case "composer/topic":
+      return {
+        ...state,
+        composer: { ...state.composer, topic: action.topic },
+      };
+
+    case "composer/menu":
+      return {
+        ...state,
+        composer: {
+          ...state.composer,
+          menuOpen: typeof action.open === "boolean" ? action.open : !state.composer.menuOpen,
+        },
+      };
+
+    case "composer/advanced":
+      return {
+        ...state,
+        composer: {
+          ...state.composer,
+          advancedOpen:
+            typeof action.open === "boolean" ? action.open : !state.composer.advancedOpen,
+        },
+      };
+
+    case "composer/override": {
+      const overrides = { ...state.composer.overrides, [action.field]: action.value };
+      return { ...state, composer: { ...state.composer, overrides } };
+    }
+
+    case "composer/allow-budget-override":
+      return {
+        ...state,
+        composer: { ...state.composer, allowBudgetOverride: Boolean(action.value) },
+      };
+
+    case "composer/reset":
+      return {
+        ...state,
+        composer: {
+          ...state.composer,
+          topic: "",
+          advancedOpen: false,
+          overrides: {
+            paper_limit: null,
+            provider_wait_seconds: null,
+            llm_request_budget: null,
+            concurrency: null,
+            source_limit: null,
+          },
+          allowBudgetOverride: false,
+        },
+      };
 
     case "ui/error":
       return {

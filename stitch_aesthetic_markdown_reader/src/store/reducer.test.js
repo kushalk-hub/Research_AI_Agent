@@ -103,4 +103,41 @@ describe("workspace actions", () => {
     expect(state.history).toHaveLength(1);
     expect(state.contexts).toHaveLength(1);
   });
+
+  describe("composer", () => {
+    it("closes the menu when a mode is chosen", () => {
+      const open = reducer(initialState, { type: "composer/menu" });
+      expect(open.composer.menuOpen).toBe(true);
+      const picked = reducer(open, { type: "composer/mode", mode: "demo" });
+      expect(picked.composer.mode).toBe("demo");
+      expect(picked.composer.menuOpen).toBe(false);
+    });
+
+    it("records only the fields the user edited", () => {
+      const state = reducer(initialState, {
+        type: "composer/override",
+        field: "paper_limit",
+        value: "7",
+      });
+      expect(state.composer.overrides.paper_limit).toBe("7");
+      expect(state.composer.overrides.llm_request_budget).toBeNull();
+    });
+
+    it("clears topic and overrides after a run but keeps the chosen mode", () => {
+      let state = reducer(initialState, { type: "composer/mode", mode: "demo" });
+      state = reducer(state, { type: "composer/topic", topic: "My topic" });
+      state = reducer(state, {
+        type: "composer/override",
+        field: "llm_request_budget",
+        value: "40",
+      });
+      state = reducer(state, { type: "composer/allow-budget-override", value: true });
+
+      const reset = reducer(state, { type: "composer/reset" });
+      expect(reset.composer.mode).toBe("demo");
+      expect(reset.composer.topic).toBe("");
+      expect(reset.composer.overrides.llm_request_budget).toBeNull();
+      expect(reset.composer.allowBudgetOverride).toBe(false);
+    });
+  });
 });

@@ -68,6 +68,51 @@ test("theme switch goes through data-theme and keeps the CSP clean", async ({ pa
   expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
 });
 
+test("the + menu states the live blocker, shows config facts and keeps the layout", async ({
+  page,
+}) => {
+  const consoleErrors = await watch(page);
+  await page.goto("/");
+
+  // With no GEMINI_API_KEY in the isolated runtime this is the reachable mode.
+  await expect(page.getByText(/deterministic demo · fods scheduler/i)).toBeVisible();
+
+  await page.getByRole("button", { name: /run settings/i }).click();
+  const dialog = page.getByRole("dialog", { name: /run settings/i });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText(/live runs need/i)).toBeVisible();
+  await expect(dialog.getByText("ollama/qwen3:4b").first()).toBeVisible();
+  await expect(dialog.getByText("Sources")).toBeVisible();
+  await expect(dialog.getByText("Daily cap")).toBeVisible();
+
+  // Advanced is collapsed by default, then shows the runtime defaults.
+  await expect(dialog.getByLabel(/papers to keep/i)).toHaveCount(0);
+  await dialog.getByRole("button", { name: /advanced/i }).click();
+  await expect(dialog.getByLabel(/papers to keep/i)).toHaveValue("20");
+  await expect(dialog.getByLabel(/model requests for this run/i)).toHaveValue("15");
+
+  const overflow = await page.evaluate(() => ({
+    root: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    body: document.body.scrollWidth - document.body.clientWidth,
+  }));
+  expect(overflow.root).toBeLessThanOrEqual(0);
+  expect(overflow.body).toBeLessThanOrEqual(0);
+
+  await page.setViewportSize({ width: 768, height: 900 });
+  const narrow = await page.evaluate(() => ({
+    root: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    body: document.body.scrollWidth - document.body.clientWidth,
+  }));
+  expect(narrow.root).toBeLessThanOrEqual(0);
+  expect(narrow.body).toBeLessThanOrEqual(0);
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  expect(await cspViolations(page)).toEqual([]);
+  expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
+});
+
 for (const width of [1280, 768]) {
   test(`no horizontal page scroll at ${width}px`, async ({ page }) => {
     const consoleErrors = await watch(page);

@@ -54,6 +54,7 @@
   --content-max: 880px;
   --content-gutter: var(--sp-6);
   --row-h: 32px;
+  --z-popover: 30;
 
   --focus-ring: 2px solid var(--accent);
 }
