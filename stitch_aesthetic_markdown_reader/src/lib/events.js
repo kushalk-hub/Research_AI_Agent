@@ -7,6 +7,7 @@
  *  the 82 already-recorded logs readable.
  */
 
+import { answerEvidence } from "./citations.js";
 import { formatDuration, redactText } from "./format.js";
 
 /** The in-thread working list shows at most this many one-liners. */
@@ -219,8 +220,8 @@ export function countPhases(events = []) {
   return seen.size;
 }
 
-/** The recorded answer, when there is one. Plain text here; citation chips and
- *  Markdown rendering arrive in slices 5 and 6. */
+/** The recorded answer, when there is one. Citation chips and evidence cards
+ *  are resolved by `lib/citations.js` (slice 5); Markdown rendering is slice 6. */
 export function answerFrom(events = []) {
   const event = [...events]
     .reverse()
@@ -234,7 +235,7 @@ export function answerFrom(events = []) {
     text,
     questionType: payload.question_type || "",
     citations: Array.isArray(payload.citations) ? payload.citations : [],
-    evidence: Array.isArray(payload.evidence) ? payload.evidence : [],
+    evidence: answerEvidence({ text }, events),
     stripped: Array.isArray(payload.stripped_citations) ? payload.stripped_citations : [],
   };
 }

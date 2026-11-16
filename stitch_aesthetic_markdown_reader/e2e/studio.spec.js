@@ -155,6 +155,35 @@ test("Stop asks the runtime to cancel a live demo and reports what was recorded"
   expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
 });
 
+test("citation chips resolve to evidence and highlight in both directions", async ({ page }) => {
+  const consoleErrors = await watch(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /run the deterministic demo/i }).click();
+
+  const article = page.getByRole("article");
+  await expect(article.getByLabel("Status: Completed")).toBeVisible({ timeout: 30_000 });
+  const answer = article.getByRole("region", { name: "Answer" });
+  await expect(answer).toBeVisible();
+
+  const p2Chip = answer.locator('.cite-row .cite-chip[data-citation="P2"]');
+  await expect(p2Chip).toHaveAttribute("aria-pressed", "false");
+  await p2Chip.click();
+
+  const p2Card = answer.locator('.evidence-item[data-citation="P2"]');
+  await expect(p2Chip).toHaveAttribute("aria-pressed", "true");
+  await expect(p2Card).toHaveAttribute("data-active", "true");
+  await expect(p2Card).toHaveAttribute("aria-pressed", "true");
+
+  const p3Card = answer.locator('.evidence-item[data-citation="P3"]');
+  await p3Card.hover();
+  await expect(answer.locator('.cite-chip[data-citation="P3"]').first()).toHaveAttribute(
+    "data-active",
+    "true",
+  );
+  expect(await cspViolations(page)).toEqual([]);
+  expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
+});
+
 for (const width of [1280, 768]) {
   test(`no horizontal page scroll at ${width}px`, async ({ page }) => {
     const consoleErrors = await watch(page);

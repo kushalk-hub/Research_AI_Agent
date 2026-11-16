@@ -17,6 +17,7 @@ from fods.webapp import (
     NewRun,
     RunHandle,
     RunManager,
+    _answer_evidence,
     _brief_saved_payload,
     _handle_info,
     _rla_stages,
@@ -958,6 +959,47 @@ def test_the_brief_validation_flag_follows_the_recorded_stripped_citations():
     assert clean["stripped_citations"] == []
     assert dropped["citations_validated"] is False
     assert dropped["stripped_citations"] == ["[9]"]
+
+
+def test_answer_evidence_carries_concepts_so_c_citations_can_resolve():
+    from types import SimpleNamespace
+
+    from rla.pipeline.traverse import NodeType, Subgraph, SubgraphNode
+
+    answer_result = SimpleNamespace(
+        subgraph=Subgraph(
+            question="How?",
+            question_type="factual",
+            nodes=[
+                SubgraphNode(
+                    node_id="W1", label="P1", type=str(NodeType.PAPER), name="Paper"
+                ),
+                SubgraphNode(
+                    node_id="concept:ml",
+                    label="C3",
+                    type=str(NodeType.CONCEPT),
+                    name="Machine learning",
+                    year=2024,
+                    extra={"aliases": ["ML"]},
+                ),
+            ],
+        )
+    )
+
+    evidence = _answer_evidence(answer_result, {"W1": {"title": "Paper"}})
+
+    assert evidence == [
+        {"citation": "P1", "paper": {"title": "Paper"}},
+        {
+            "citation": "C3",
+            "concept": {
+                "id": "concept:ml",
+                "name": "Machine learning",
+                "year": 2024,
+                "aliases": ["ML"],
+            },
+        },
+    ]
 
 
 def test_finished_handles_are_evicted_but_stay_readable_from_disk(tmp_path, monkeypatch):

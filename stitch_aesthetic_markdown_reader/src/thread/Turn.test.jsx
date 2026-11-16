@@ -129,25 +129,150 @@ describe("Turn collapse", () => {
 });
 
 describe("Turn answer and state", () => {
-  it("renders the recorded answer and the stripped-citation notice", () => {
+  function card(citation, overrides = {}) {
+    return {
+      citation,
+      kind: citation.startsWith("C") ? "concept" : "paper",
+      missing: false,
+      title: citation.startsWith("C") ? `Concept ${citation}` : `Paper ${citation}`,
+      year: 2024,
+      authors: [],
+      venue: "",
+      abstract: "",
+      doi: "",
+      url: "",
+      ...overrides,
+    };
+  }
+
+  function answer(overrides = {}) {
+    return {
+      seq: 4,
+      text: "The graph holds [P1] and learns [C3].",
+      questionType: "factual",
+      citations: ["P1", "C3"],
+      evidence: [card("P1"), card("C3")],
+      stripped: [],
+      ...overrides,
+    };
+  }
+
+  it("renders the recorded answer, chips and evidence without injecting HTML", () => {
+    const scrolled = [];
+    Element.prototype.scrollIntoView = vi.fn(function scroll() {
+      scrolled.push(this);
+    });
+    try {
+      render(
+        <Turn
+          turn={makeTurn({
+            answer: answer({
+              stripped: ["[P9]"],
+              evidence: [
+                card("P1", { title: "<script>alert(1)</script>" }),
+                card("C3"),
+              ],
+            }),
+          })}
+          onOpenTrace={() => {}}
+        />,
+      );
+
+      const region = screen.getByRole("region", { name: "Answer" });
+      expect(region).toBeTruthy();
+      expect(region.querySelector("script")).toBeNull();
+      expect(screen.getByText("<script>alert(1)</script>")).toBeTruthy();
+      expect(screen.getByText(/could not be matched to the evidence graph/)).toBeTruthy();
+      expect(screen.getByRole("list", { name: "Citations in this answer" })).toBeTruthy();
+
+      fireEvent.click(
+        screen.getAllByRole("button", { name: /Select evidence for \[P1\]/i })[0],
+      );
+      const evidenceCard = screen.getByRole("button", {
+        name: /Evidence \[P1\]: <script>alert\(1\)<\/script>/i,
+      });
+      expect(evidenceCard.getAttribute("data-active")).toBe("true");
+      expect(evidenceCard.getAttribute("aria-pressed")).toBe("true");
+      expect(scrolled).toContain(evidenceCard);
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+        block: "nearest",
+        behavior: "smooth",
+      });
+    } finally {
+      delete Element.prototype.scrollIntoView;
+    }
+  });
+
+  it("highlights the chips when an evidence card is hovered", () => {
+    render(<Turn turn={makeTurn({ answer: answer() })} onOpenTrace={() => {}} />);
+    const evidenceCard = screen.getByRole("button", {
+      name: /Evidence \[C3\]: Concept C3/i,
+    });
+    fireEvent.mouseEnter(evidenceCard);
+    for (const chip of document.querySelectorAll('.cite-chip[data-citation="C3"]')) {
+      expect(chip.getAttribute("data-active")).toBe("true");
+    }
+    fireEvent.mouseLeave(evidenceCard);
+    for (const chip of document.querySelectorAll('.cite-chip[data-citation="C3"]')) {
+      expect(chip.getAttribute("data-active")).toBeNull();
+    }
+  });
+
+  it("scrolls to the last evidence card, not just the first ten", () => {
+    const scrolled = [];
+    Element.prototype.scrollIntoView = vi.fn(function scroll() {
+      scrolled.push(this);
+    });
+    try {
+      const cards = Array.from({ length: 14 }, (_, index) => card(`P${index + 1}`));
+      render(
+        <Turn
+          turn={makeTurn({
+            answer: answer({
+              text: "Long answer [P14].",
+              citations: ["P14"],
+              evidence: cards,
+            }),
+          })}
+          onOpenTrace={() => {}}
+        />,
+      );
+
+      expect(document.querySelectorAll(".evidence-item")).toHaveLength(14);
+      fireEvent.click(
+        screen.getAllByRole("button", { name: /Select evidence for \[P14\]/i })[0],
+      );
+      const last = document.querySelector('.evidence-item[data-citation="P14"]');
+      expect(last.getAttribute("data-active")).toBe("true");
+      expect(scrolled).toContain(last);
+    } finally {
+      delete Element.prototype.scrollIntoView;
+    }
+  });
+
+  it("selects a concept card with the keyboard (native button)", () => {
+    render(<Turn turn={makeTurn({ answer: answer() })} onOpenTrace={() => {}} />);
+    const evidenceCard = screen.getByRole("button", { name: /Evidence \[C3\]/i });
+    expect(evidenceCard.tagName).toBe("BUTTON");
+    evidenceCard.focus();
+    fireEvent.click(evidenceCard);
+    expect(evidenceCard.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("states unresolved citations instead of calling them verified", () => {
     render(
       <Turn
         turn={makeTurn({
-          answer: {
-            seq: 4,
-            text: "The graph holds. [P1]",
-            questionType: "factual",
-            citations: ["[P1]"],
-            evidence: [],
-            stripped: ["[P9]"],
-          },
+          answer: answer({
+            text: "Holds [P1] [P9].",
+            evidence: [card("P1"), card("P9", { missing: true })],
+          }),
         })}
         onOpenTrace={() => {}}
       />,
     );
-    expect(screen.getByRole("region", { name: "Answer" })).toBeTruthy();
-    expect(screen.getByText("The graph holds. [P1]")).toBeTruthy();
-    expect(screen.getByText(/could not be matched to the evidence graph/)).toBeTruthy();
+    expect(screen.getByText(/no recorded evidence card/)).toBeTruthy();
+    expect(screen.getByText(/marked as not recorded/)).toBeTruthy();
   });
 
   it("shows a stopping chip while a stop is pending", () => {

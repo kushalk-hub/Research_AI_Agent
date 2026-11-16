@@ -185,14 +185,18 @@ describe("answerFrom", () => {
         },
       },
     ]);
-    expect(answer).toEqual({
+    expect(answer).toMatchObject({
       seq: 2,
       text: "The graph holds. [P1]",
       questionType: "factual",
       citations: ["[P1]"],
-      evidence: [{ citation: "[P1]" }],
       stripped: ["[P9]"],
     });
+    // A cited label with no recorded card still resolves, honestly, to a
+    // "not recorded" card instead of a dead chip.
+    expect(answer.evidence).toEqual([
+      expect.objectContaining({ citation: "P1", kind: "paper", missing: true }),
+    ]);
   });
 
   it("returns null when no answer text was recorded", () => {

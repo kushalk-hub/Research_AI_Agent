@@ -521,18 +521,11 @@ class RunManager:
             paper_count = len(result.corpus.papers) if result.corpus else 0
             complete = bool(answer and graph_ok and paper_count and extracted >= paper_count)
             if answer_result and result.corpus:
-                from rla.pipeline.traverse import NodeType
-
                 corpus_by_id = {
                     paper.id: paper.model_dump(mode="json")
                     for paper in result.corpus.papers
                 }
-                evidence = []
-                for node in answer_result.subgraph.nodes if answer_result.subgraph else []:
-                    if node.type == str(NodeType.PAPER) and node.node_id in corpus_by_id:
-                        evidence.append(
-                            {"citation": node.label, "paper": corpus_by_id[node.node_id]}
-                        )
+                evidence = _answer_evidence(answer_result, corpus_by_id)
                 event_log.emit(
                     "research_answer",
                     "Cited answer generated",
@@ -837,6 +830,42 @@ def _brief_saved_payload(
         "citations_validated": not stripped,
         "stripped_citations": stripped,
     }
+
+
+def _answer_evidence(
+    answer_result: Any, corpus_by_id: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Evidence cards for a cited answer (UI-09, A-07).
+
+    Papers resolve `[P#]`; concepts resolve `[C#]`. Concept labels had no
+    evidence record at all before this, so a real `[C3]` in an answer could
+    never be highlighted. The shape is additive: paper cards keep the corpus
+    dump, concept cards carry the traversed name, year and aliases.
+    """
+    from rla.pipeline.traverse import NodeType
+
+    evidence: list[dict[str, Any]] = []
+    subgraph = getattr(answer_result, "subgraph", None)
+    for node in getattr(subgraph, "nodes", []) or []:
+        node_type = str(getattr(node, "type", ""))
+        if node_type == str(NodeType.PAPER) and node.node_id in corpus_by_id:
+            evidence.append(
+                {"citation": node.label, "paper": corpus_by_id[node.node_id]}
+            )
+        elif node_type == str(NodeType.CONCEPT):
+            extra = getattr(node, "extra", None) or {}
+            evidence.append(
+                {
+                    "citation": node.label,
+                    "concept": {
+                        "id": node.node_id,
+                        "name": node.name,
+                        "year": node.year,
+                        "aliases": list(extra.get("aliases") or []),
+                    },
+                }
+            )
+    return evidence
 
 
 def _status_from_finish(event: dict[str, Any]) -> str:

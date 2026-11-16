@@ -36,7 +36,7 @@ This file is the durable memory of the work. Update after every slice.
 | 3a | Backend for UI: enrichment, `pipeline`, status, terminal guarantee, brief JSON, codes | **done** | `feat(backend)` commit | pytest 838+1 · ruff clean · replay of the golden log byte-identical | - |
 | 3b | Backend hardening: A-02, A-03, A-07, A-08, A-09, A-11 | **done** (A-03 was slice 3a: `pipeline` + `capabilities.rla_live`) | `feat(backend)` commit | pytest 855+1 · ruff clean · 69 stored logs clean · 7 absolute paths → 0 | - |
 | 4 | Thread lifecycle: working lines, chip, New investigation, Stop | **done** | `feat(ui)` commit | pytest 858+1 · ruff clean · build 25.19 kB css / 282.59 kB js · vitest 137 · Playwright 7 | — |
-| 5 | Answer + evidence: citation chips, scroll, `[C#]` | planned | — | |
+| 5 | Answer + evidence: citation chips, scroll, `[C#]` | **done** | `feat(ui)` commit | pytest 859+1 · ruff clean · build 27.94 kB css / 289.60 kB js · vitest 151 · Playwright 8 | — |
 | 6 | Brief overlay | planned | — | |
 | 7 | Trace: waterfall, filters, detail, virtualisation, in-chat lines | planned | — | |
 | 8 | Lab: DAG, queue, workers, stacks, playback, RLA phase rail | planned | — | **STOP for review** |
@@ -359,6 +359,51 @@ App lifecycle, views); Playwright `7 passed (9.3s)` (was 5; +worked-for collapse
 **Not verified here.** A live RLA Stop was exercised with a fake pipeline (no `GEMINI_API_KEY`
 on this machine); the real provider path is NOT VERIFIED until a key is present. Docker on 8765
 still serves the old UI (slice 9).
+
+## Slice 5 detail (answer + evidence, UI-09/A-07)
+
+**Files.** `src/fods/webapp.py`; frontend `lib/citations.js` (new), `lib/events.js`,
+`thread/AnswerCard.jsx` (new), `thread/Citations.jsx` (new), `thread/EvidencePanel.jsx` (new),
+`thread/Turn.jsx`, `styles/app.css`; tests `tests/test_fods_webapp.py`, new
+`lib/citations.test.js`, new `lib/citations.fixture.test.js`, `lib/events.test.js`,
+`thread/Turn.test.jsx`, `e2e/studio.spec.js`.
+
+1. **Every recorded label resolves, including the last card.** `parseCitations()` splits prose
+   into literal text and `[P#]`/`[C#]` groups; it handles the real `[P2, C4]` group in
+   `efee736eb669`, which the backend's `citations_used()` regex does not list. Evidence comes
+   from all three recorded shapes: RLA `research_answer.evidence`, FODS
+   `evidence_selected.evidence`, and — for the 82 existing logs — the `traverse` progress event
+   that already carries the subgraph nodes. There is no `.slice(0, 10)`: a 14-card test clicks
+   `[P14]` and asserts the 14th card is selected and scrolled to.
+2. **`[C#]` is real now.** Backend addition #7: `_answer_evidence()` adds
+   `{citation:"C3", concept:{id,name,year,aliases}}` for `NodeType.CONCEPT` nodes, next to the
+   paper cards. The frontend also resolves old logs from `traverse.stage_payload.nodes`, so the
+   audit's `efee736eb669` (`[C3]`, `[C4]`) resolves without re-running anything.
+3. **Two-way highlight and scroll.** Clicking a chip selects the card, sets `aria-pressed` on
+   both sides and calls `scrollIntoView({block:"nearest"})` with `behavior:"smooth"` unless
+   `prefers-reduced-motion` is set; cards carry `scroll-margin-block`. Hover/focus of a card
+   marks every matching chip `data-active`, and hovering a chip marks the card. Cards are native
+   `<button>` elements, so `Enter`/`Space` work; source links are siblings of the button (no
+   nested interactive content) and only `http(s)` URLs are rendered.
+4. **A-07 stays honest.** A cited label with no recorded card gets an explicit dashed card
+   ("No recorded evidence for [P#]") and a visible note; stripped citations keep their existing
+   "removed" note. The new copy avoids the banned verification vocabulary and the copy test
+   still passes. Answer prose is React text nodes only — no `dangerouslySetInnerHTML`.
+5. **Layout.** One DOM tree: a 320 px evidence column beside the prose at ≥1280 px, stacked under
+   the answer below that (design §3). The evidence list is its own scroll container, so a chip
+   moves the list, not the page.
+
+**Slice 5 gate (measured, this worktree):** pytest `859 passed, 1 skipped in 243.24s` (was
+858+1; +1 `_answer_evidence` concept test); `ruff check src/ tests/` all checks passed; vite build
+27.94 kB css / 289.60 kB js (was 25.19/282.59); vitest `151 passed in 14 files` (was 137; +4
+citation parsing/resolution, +2 golden-log resolution, +8 Turn citation interactions); Playwright
+`8 passed (7.4s)` (was 7; +citation click/hover, CSP and console still zero); the golden-log test
+proves every `[P#]`/`[C#]` in both fixture answers resolves, including `[C4]`.
+
+**Not verified here.** No live RLA run on this machine (`GEMINI_API_KEY` absent), so the new
+backend concept cards are tested with a constructed subgraph, not a live provider. Docker on 8765
+still serves the old UI (slice 9). The brief overlay (Markdown rendering, copy/download) is
+slice 6.
 
 ## Blockers / notes
 

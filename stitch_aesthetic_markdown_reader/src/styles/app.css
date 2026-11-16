@@ -635,24 +635,46 @@
   font-size: var(--fs-1);
 }
 
-/* ---------- Answer card ---------- */
+/* ---------- Answer card and evidence (UI-09) ---------- */
 
 .answer-card {
   margin-top: var(--sp-4);
-  padding: var(--sp-3) var(--sp-4);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent);
   border-radius: var(--r-2);
   background: var(--surface-2);
 }
 
+.answer-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
 .answer-label {
-  margin: 0 0 var(--sp-2);
+  margin: 0;
   color: var(--accent);
   font-size: var(--fs-1);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+
+/* At 1280 px and wider the evidence is a column beside the prose; below that
+   the same list stacks under the answer (design §3). One DOM tree, so a chip
+   can never point at a card that only exists in the other layout. */
+.answer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.answer-main {
+  min-width: 0;
 }
 
 .answer-text {
@@ -665,10 +687,171 @@
   overflow-wrap: anywhere;
 }
 
+.cite-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cite-chip {
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  line-height: var(--lh-1);
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+
+.cite-chip:hover,
+.cite-chip[data-active="true"] {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+  color: var(--ink);
+}
+
+.cite-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.cite-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.evidence-panel {
+  min-width: 0;
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+
+.evidence-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.evidence-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.evidence-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 420px;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.evidence-item {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  /* A scrolled-to card must not sit flush under the panel's edge. */
+  scroll-margin-block: var(--sp-2);
+}
+
+.evidence-item:hover,
+.evidence-item[data-active="true"] {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+.evidence-item[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
+
+.evidence-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.evidence-item[data-missing="true"] {
+  border-style: dashed;
+}
+
+.evidence-cite {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+}
+
+.evidence-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.evidence-name {
+  font-size: var(--fs-2);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.evidence-meta,
+.evidence-abstract {
+  color: var(--muted);
+  font-size: var(--fs-1);
+  line-height: var(--lh-2);
+  overflow-wrap: anywhere;
+}
+
+.evidence-link {
+  display: inline-block;
+  margin: 2px 0 0 48px;
+  color: var(--accent);
+  font-size: var(--fs-1);
+}
+
 .answer-note {
   margin: var(--sp-3) 0 0;
   color: var(--muted);
   font-size: var(--fs-2);
+}
+
+@media (max-width: 1279px) {
+  .answer-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .evidence-list {
+    max-height: 280px;
+  }
 }
 
 .worked-for {

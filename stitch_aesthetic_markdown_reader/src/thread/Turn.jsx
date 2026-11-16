@@ -2,6 +2,7 @@ import { Activity } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { modeLabel, phaseLabel } from "../lib/events.js";
 import StatusChip from "../ui/StatusChip.jsx";
+import AnswerCard from "./AnswerCard.jsx";
 
 /** Design §5.1: the in-thread working list updates at most twice a second, so a
  *  burst of events cannot flood a screen reader. */
@@ -78,19 +79,7 @@ export default function Turn({ turn, onOpenTrace }) {
           </div>
         ) : null}
 
-        {turn.answer && (
-          <section className="answer-card" aria-label="Answer">
-            <p className="answer-label">Answer</p>
-            <p className="answer-text">{turn.answer.text}</p>
-            {turn.answer.stripped.length > 0 && (
-              <p className="answer-note">
-                {turn.answer.stripped.length} citation
-                {turn.answer.stripped.length === 1 ? "" : "s"} in this answer could not be
-                matched to the evidence graph and were removed.
-              </p>
-            )}
-          </section>
-        )}
+        {turn.answer && <AnswerCard answer={turn.answer} />}
 
         {turn.stream === "error" && (
           <p className="turn-note" role="status">
