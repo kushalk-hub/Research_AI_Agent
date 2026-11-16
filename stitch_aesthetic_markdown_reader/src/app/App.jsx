@@ -203,7 +203,12 @@ export default function App() {
             <TraceView run={activeRun} onFocusComposer={focusComposer} />
           )}
           {state.page === "lab" && (
-            <LabView state={state} run={activeRun} onFocusComposer={focusComposer} />
+            <LabView
+              state={state}
+              run={activeRun}
+              onFocusComposer={focusComposer}
+              onLab={(patch) => dispatch({ type: "lab/update", patch })}
+            />
           )}
           {state.page === "library" && (
             <LibraryView

@@ -31,4 +31,9 @@ afterEach(() => {
   } catch {
     /* storage is optional in jsdom configurations */
   }
+  try {
+    globalThis.sessionStorage?.clear();
+  } catch {
+    /* storage is optional in jsdom configurations */
+  }
 });

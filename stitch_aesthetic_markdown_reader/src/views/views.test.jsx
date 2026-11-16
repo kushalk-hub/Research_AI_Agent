@@ -1,9 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import LabView from "./LabView.jsx";
 import TraceView from "./TraceView.jsx";
 import Turn from "../thread/Turn.jsx";
-import { initialState } from "../store/reducer.js";
 
 const run = {
   id: "0123456789ab",
@@ -20,27 +18,6 @@ const run = {
     { seq: 2, kind: "task_started", message: "search_alpha started", payload: {} },
   ],
 };
-
-describe("LabView", () => {
-  it("renders the plan levels the runtime recorded", () => {
-    render(<LabView state={initialState} run={run} onFocusComposer={() => {}} />);
-    expect(screen.getByText("Level 0")).toBeTruthy();
-    expect(screen.getByText("search_alpha")).toBeTruthy();
-    expect(screen.getByText("2 tasks")).toBeTruthy();
-    expect(screen.getByText(/3 tasks · 2 levels · Completed/)).toBeTruthy();
-  });
-
-  it("does not invent a plan for a run that never recorded one", () => {
-    render(
-      <LabView
-        state={initialState}
-        run={{ ...run, events: [{ seq: 1, kind: "run_started", payload: {} }] }}
-        onFocusComposer={() => {}}
-      />,
-    );
-    expect(screen.getByText(/has not recorded a plan yet/)).toBeTruthy();
-  });
-});
 
 describe("TraceView", () => {
   it("renders recorded events oldest first as table rows", () => {

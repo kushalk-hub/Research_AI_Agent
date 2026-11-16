@@ -19,6 +19,14 @@ export const initialState = {
   theme: "system", // system | light | dark
   error: null, // { message, code, fields }
 
+  /* Lab view state (design §3): cursor null means "follow the head". */
+  lab: {
+    tab: "plan",
+    cursor: null,
+    playing: false,
+    speed: 1,
+  },
+
   /* composer state (per session, survives navigation) */
   composerEpoch: 0, // bumped by New investigation to clear the local textarea
   composer: {
@@ -119,6 +127,7 @@ export function reducer(state, action) {
         order: upsertOrder(state.order, id),
         activeRunId: id,
         error: null,
+        lab: { ...state.lab, cursor: null, playing: false },
       };
     }
 
@@ -199,11 +208,18 @@ export function reducer(state, action) {
     case "run/selected": {
       if (!action.runId) return { ...state, activeRunId: null };
       if (!state.runs[action.runId]) return state;
-      return { ...state, activeRunId: action.runId };
+      return {
+        ...state,
+        activeRunId: action.runId,
+        lab: { ...state.lab, cursor: null, playing: false },
+      };
     }
 
     case "ui/page":
       return { ...state, page: action.page };
+
+    case "lab/update":
+      return { ...state, lab: { ...state.lab, ...(action.patch || {}) } };
 
     case "ui/theme":
       return { ...state, theme: action.theme };
@@ -277,6 +293,7 @@ export function reducer(state, action) {
         page: "research",
         composerEpoch: state.composerEpoch + 1,
         composer: resetComposer(state.composer),
+        lab: { ...state.lab, cursor: null, playing: false },
       };
 
     default:

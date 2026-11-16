@@ -268,6 +268,66 @@ test("the trace table is virtualised, filterable and keyboard navigable", async 
   expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
 });
 
+test("the Lab renders the recorded plan, queue, stacks and states at the playhead", async ({
+  page,
+}) => {
+  const consoleErrors = await watch(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /run the deterministic demo/i }).click();
+
+  const article = page.getByRole("article");
+  await expect(article.getByLabel("Status: Completed")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: /FODS Lab/i }).click();
+
+  await expect(page.getByRole("heading", { name: "Recorded structure" })).toBeVisible();
+  await expect(page.getByText("114 of 114 events · 100%")).toBeVisible();
+  await expect(page.locator(".lab-node")).toHaveCount(8);
+  await expect(page.locator(".lab-edge")).toHaveCount(8);
+
+  await page.locator(".lab-node").first().click();
+  await expect(page.getByRole("heading", { name: "Selected task" })).toBeVisible();
+
+  await page.getByRole("tab", { name: "Queue" }).click();
+  await expect(page.getByRole("heading", { name: "Ready queue" })).toBeVisible();
+  await expect(page.getByText(/Last recorded non-empty snapshot at event 102/)).toBeVisible();
+  await expect(page.getByText(/Priority not recorded in FIFO mode/)).toBeVisible();
+  await expect(page.locator(".lab-slot")).toHaveCount(3);
+
+  await page.getByRole("tab", { name: "Stacks" }).click();
+  await expect(page.getByRole("heading", { name: "Run stack" })).toBeVisible();
+  await expect(page.locator(".lab-stack-card")).toHaveCount(8);
+
+  await page.getByRole("tab", { name: "State" }).click();
+  await expect(page.locator(".lab-state-table tbody tr")).toHaveCount(8);
+
+  // Scrubbing back must rebuild the state, not keep the finished run.
+  await page.getByLabel("Playback position").evaluate((input) => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    setValue.call(input, "30");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(page.getByText("30 of 114 events · 26%")).toBeVisible();
+  await expect(page.locator(".lab-state-table tbody tr")).toHaveCount(8);
+  await expect(page.getByText("Running").first()).toBeVisible();
+
+  await page.getByRole("button", { name: "Step back one event" }).click();
+  await expect(page.getByText("29 of 114 events · 25%")).toBeVisible();
+  await expect(page.getByText("REPLAY")).toBeVisible();
+
+  // The stacked layout must not create sideways page scroll.
+  await page.setViewportSize({ width: 768, height: 900 });
+  const overflow = await page.evaluate(() => ({
+    root: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    body: document.body.scrollWidth - document.body.clientWidth,
+  }));
+  expect(overflow.root).toBeLessThanOrEqual(0);
+  expect(overflow.body).toBeLessThanOrEqual(0);
+
+  expect(await cspViolations(page)).toEqual([]);
+  expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
+});
+
 test("the saved brief opens in a drawer, never a raw Markdown tab", async ({ page }) => {
   const consoleErrors = await watch(page);
   const extraPages = [];
