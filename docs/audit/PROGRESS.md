@@ -12,7 +12,7 @@ This file is the durable memory of the work. Update after every slice.
 | 1 | Separate worktree + new branch; own venv; `main` staging untouched | done (`D:\fods-studio-redesign`, venv at `.venv`) |
 | 2 | UI-07 = option (a) labelled phase graph + "Run the deterministic demo" chip in the empty thread | planned (slice 8 + slice 1) |
 | 3 | `vitest`, `@testing-library/react`, `jsdom` pinned; Playwright dev-only via `npm run test:e2e`, never in Docker | done (slice 1; exact pins, licence-clean) |
-| 4 | RLA cooperative cancel, minimal diff; stop and ask if invasive | planned (slice 4) |
+| 4 | RLA cooperative cancel, minimal diff; stop and ask if invasive | **done** (slice 4; the diff stays in `webapp._execute_research_pipeline`, `src/rla` untouched) |
 | 5 | Budget = configured cap verbatim + explicit override, enforced server-side with `fields` + stable `code`; remove `webapp.py:57` default of 100 | **done** (`8cd8af1` + slice 2; server returns `code=budget_override_required`, composer states the cap and needs a tick) |
 | 6 | Backend one-liners + single `describeEvent()` fallback; redacted, ≤90 chars, no raw JSON/paths | **done backend** (`fods/event_meta.py`; frontend fallback is slice 7) |
 | 7 | Delete legacy shell only in slice 9, after green behavioural tests; keep `tests/fixtures/fods_frontend/demo_data.json` | planned (slice 9) |
@@ -35,7 +35,7 @@ This file is the durable memory of the work. Update after every slice.
 | 2 | Composer `+` menu, mode, config, advanced validation, budget | **done** | `feat(ui)` commit | pytest 817+1 · ruff clean · build 24.15 kB css / 275.99 kB js · vitest 112 · Playwright 5 | — |
 | 3a | Backend for UI: enrichment, `pipeline`, status, terminal guarantee, brief JSON, codes | **done** | `feat(backend)` commit | pytest 838+1 · ruff clean · replay of the golden log byte-identical | - |
 | 3b | Backend hardening: A-02, A-03, A-07, A-08, A-09, A-11 | **done** (A-03 was slice 3a: `pipeline` + `capabilities.rla_live`) | `feat(backend)` commit | pytest 855+1 · ruff clean · 69 stored logs clean · 7 absolute paths → 0 | - |
-| 4 | Thread lifecycle: working lines, chip, New investigation, Stop | planned | — | |
+| 4 | Thread lifecycle: working lines, chip, New investigation, Stop | **done** | `feat(ui)` commit | pytest 858+1 · ruff clean · build 25.19 kB css / 282.59 kB js · vitest 137 · Playwright 7 | — |
 | 5 | Answer + evidence: citation chips, scroll, `[C#]` | planned | — | |
 | 6 | Brief overlay | planned | — | |
 | 7 | Trace: waterfall, filters, detail, virtualisation, in-chat lines | planned | — | |
@@ -303,6 +303,62 @@ sanitising; its stored brief path is served as `data/fods/briefs/efee736eb669.md
 **Not verified here.** The Docker image on 8765 was not running, so the container path is
 NOT VERIFIED for 3b too. No browser was used to exercise the new `retry:`/`historical` fields;
 that wiring lands in slice 4.
+
+## Slice 4 detail (thread lifecycle, Stop)
+
+**Files.** `src/fods/webapp.py`; frontend `lib/events.js`, `store/reducer.js`,
+`store/selectors.js`, `store/useRunStream.js`, new `composer/useStopRun.js`, `composer/Composer.jsx`,
+`app/App.jsx`, `thread/Turn.jsx`, `thread/Thread.jsx`, `styles/app.css`; tests
+`tests/test_fods_webapp.py`, `lib/events.test.js`, `store/reducer.test.js`, new
+`thread/Turn.test.jsx`, `app/App.test.jsx`, `views/views.test.jsx`, `e2e/studio.spec.js`.
+
+1. **A-10 — Stop is real for both engines.** `DELETE /api/runs/<id>` already set
+   `handle.cancel_event`, and the FODS runtime checks it every scheduling iteration
+   (`runtime.py:685`, `876`). The RLA wrapper did not take it at all, so a DELETE on an RLA run
+   was a false confirmation. `_execute_research_pipeline` now checks `handle.cancel_event`
+   between pipeline items, stops requesting work, emits
+   `run_finished(termination_reason="cancelled", cancellation_requested=True)` and calls
+   `handle.finish("cancelled", "stopped on request")`. The shared `src/rla` pipeline is not
+   modified. `_status_from_finish` checks `cancelled` **before** `succeeded`, so a Stop that
+   lands as the last item completes is reported as stopped, not completed.
+2. **One derivation for the in-thread list.** `workingLines(events)` returns the last six
+   non-terminal one-liners, each phase-tagged by the recorded `payload.phase`, plus `more`;
+   `workedFor(events)` reads `elapsed_ms` and `stages` from the terminal record only, and
+   `answerFrom(events)` reads `research_answer`/`answer_ready`. The list lives in one
+   `aria-live="polite"` region and is throttled in `Turn` to one update per 500 ms (a 114-event
+   demo cannot flood a screen reader). On the terminal event the list is removed and replaced by
+   `Worked for 2m 14s · 9 steps`; when `elapsed_ms` is absent the button says "Worked for an
+   unrecorded duration", never a guess. The button's accessible name still contains
+   "open execution trace", so both the existing selector and the design's "expandable into the
+   Trace" intent hold.
+3. **Status is derived, then reconciled.** `useRunStream` fetches `GET /api/runs/<id>` on mount,
+   on selection (the effect re-runs) and on every `onState("live")` (reconnect) and dispatches
+   `run/info`. The reducer refuses to let the fetch walk a status backwards after events have
+   arrived and refuses to overwrite a terminal event already in the stream. `Stopping` is a UI
+   state, not a backend status: it shows on the chip only after the DELETE was sent, is cleared
+   by `run/stop-rejected` or by any recorded terminal event, and is replaced by `Stopped` when
+   the record says `cancelled`.
+4. **New investigation is honest about the old run.** It requests cancellation of a live,
+   non-replay run before clearing, then bumps `composerEpoch` (the question text lives in the
+   Composer, not the store, so a store-only reset cannot clear it), resets topic/advanced/budget
+   overrides, and keeps the chosen mode. If the stop request fails the conversation stays
+   visible and the banner says why. Stop is **hidden** — not disabled-with-a-lie — for a replay
+   and for a run read from disk, where there is no live process to cancel.
+5. **A-07 in the thread.** An answer whose citations could not be matched to the evidence graph
+   gets an explicit "N citations ... were removed" note; the answer is never labelled validated.
+   `warnings > 0` from the tolerant log reader is also stated ("N unreadable log lines were
+   skipped").
+
+**Slice 4 gate (measured, this worktree):** pytest `858 passed, 1 skipped in 211.59s` (was
+855+1; +3 webapp: cancelled-before-succeeded, demo Stop, RLA cancel between items);
+`ruff check src/ tests/` all checks passed; vite build 25.19 kB css / 282.59 kB js (was
+24.15/275.99); vitest `137 passed in 12 files` (was 112; +25: events, reducer, new Turn tests,
+App lifecycle, views); Playwright `7 passed (9.3s)` (was 5; +worked-for collapse + Stop);
+`data/` untouched (`git status` clean) and `src/fods/web/` unchanged.
+
+**Not verified here.** A live RLA Stop was exercised with a fake pipeline (no `GEMINI_API_KEY`
+on this machine); the real provider path is NOT VERIFIED until a key is present. Docker on 8765
+still serves the old UI (slice 9).
 
 ## Blockers / notes
 

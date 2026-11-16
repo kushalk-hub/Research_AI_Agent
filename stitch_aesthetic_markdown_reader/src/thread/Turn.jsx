@@ -1,12 +1,44 @@
 import { Activity } from "lucide-react";
-import { modeLabel } from "../lib/events.js";
+import { useEffect, useRef, useState } from "react";
+import { modeLabel, phaseLabel } from "../lib/events.js";
 import StatusChip from "../ui/StatusChip.jsx";
 
+/** Design §5.1: the in-thread working list updates at most twice a second, so a
+ *  burst of events cannot flood a screen reader. */
+export const WORKING_THROTTLE_MS = 500;
+
+function workedForLabel(workedFor) {
+  const steps = workedFor.steps;
+  const unit = steps === 1 ? "step" : "steps";
+  if (!workedFor.duration) return `Worked for an unrecorded duration · ${steps} ${unit}`;
+  return `Worked for ${workedFor.duration} · ${steps} ${unit}`;
+}
+
 /** One question and the evidence-backed state of the run that answers it.
- *  The working lines are the last recorded events, verbatim through
- *  `describeEvent()`; they are not a spinner with invented copy. */
+ *
+ *  Working lines are the recorded one-liners (`describeEvent()`), capped at six
+ *  plus "and N more". On the terminal event the list collapses to the recorded
+ *  duration and step count; a missing duration is stated, never guessed. The
+ *  answer card shows only what a recorded answer event actually contains. */
 export default function Turn({ turn, onOpenTrace }) {
-  const live = turn.stream === "live" || turn.stream === "connecting";
+  const live = !turn.finished && (turn.stream === "live" || turn.stream === "connecting");
+  const [snapshot, setSnapshot] = useState(turn.working);
+  const latest = useRef(turn.working);
+  latest.current = turn.working;
+
+  useEffect(() => {
+    if (!live) {
+      setSnapshot(turn.working);
+      return undefined;
+    }
+    const timer = setInterval(() => setSnapshot(latest.current), WORKING_THROTTLE_MS);
+    return () => clearInterval(timer);
+    // `turn.working` is a fresh object each render; the effect must key on the
+    // run identity and liveness, not on object identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, turn.id]);
+
+  const working = snapshot || { lines: [], more: 0 };
 
   return (
     <article className="turn" aria-label={`Run ${turn.id}`}>
@@ -15,7 +47,14 @@ export default function Turn({ turn, onOpenTrace }) {
       <div className="turn-card">
         <div className="turn-head">
           <strong>{turn.engineLabel}</strong>
-          <StatusChip status={turn.status} reason={turn.statusReason} />
+          <StatusChip
+            status={turn.stopping ? "stopping" : turn.status}
+            reason={
+              turn.stopping
+                ? "Stop requested; waiting for the recorded outcome."
+                : turn.statusReason
+            }
+          />
           <span className="badge">{modeLabel(turn.mode)}</span>
           <code className="mono">{turn.id}</code>
           <span className="num">{turn.eventCount} events</span>
@@ -23,12 +62,34 @@ export default function Turn({ turn, onOpenTrace }) {
 
         {turn.eventCount === 0 ? (
           <p className="turn-note">Waiting for the first recorded event…</p>
-        ) : (
-          <ol className="working-list" aria-live={live ? "polite" : "off"} aria-label="Recent recorded events">
-            {turn.recent.map((line) => (
-              <li key={line.seq}>{line.text}</li>
-            ))}
-          </ol>
+        ) : !turn.finished ? (
+          <div className="working" aria-live={live ? "polite" : "off"}>
+            <ol className="working-list" aria-label="Recent recorded events">
+              {working.lines.map((line) => (
+                <li key={line.seq} data-phase={line.phase}>
+                  <span className="working-phase">{phaseLabel(line.phase)}</span>
+                  <span className="working-text">{line.text}</span>
+                </li>
+              ))}
+            </ol>
+            {working.more > 0 && (
+              <p className="working-more">and {working.more} more</p>
+            )}
+          </div>
+        ) : null}
+
+        {turn.answer && (
+          <section className="answer-card" aria-label="Answer">
+            <p className="answer-label">Answer</p>
+            <p className="answer-text">{turn.answer.text}</p>
+            {turn.answer.stripped.length > 0 && (
+              <p className="answer-note">
+                {turn.answer.stripped.length} citation
+                {turn.answer.stripped.length === 1 ? "" : "s"} in this answer could not be
+                matched to the evidence graph and were removed.
+              </p>
+            )}
+          </section>
         )}
 
         {turn.stream === "error" && (
@@ -37,14 +98,33 @@ export default function Turn({ turn, onOpenTrace }) {
           </p>
         )}
 
+        {turn.warnings > 0 && (
+          <p className="turn-note">
+            {turn.warnings} unreadable log line{turn.warnings === 1 ? " was" : "s were"} skipped;
+            the rest of the record is shown.
+          </p>
+        )}
+
         {turn.statusReason && <p className="turn-note">{turn.statusReason}</p>}
 
         {turn.finished && (
           <div className="turn-actions">
-            <button type="button" className="btn btn--sm" onClick={onOpenTrace}>
-              <Activity size={14} aria-hidden="true" />
-              Open execution trace
-            </button>
+            {turn.workedFor ? (
+              <button
+                type="button"
+                className="btn btn--sm worked-for"
+                onClick={onOpenTrace}
+                aria-label={`${workedForLabel(turn.workedFor)} — open execution trace`}
+              >
+                <Activity size={14} aria-hidden="true" />
+                <span>{workedForLabel(turn.workedFor)}</span>
+              </button>
+            ) : (
+              <button type="button" className="btn btn--sm" onClick={onOpenTrace}>
+                <Activity size={14} aria-hidden="true" />
+                Open execution trace
+              </button>
+            )}
           </div>
         )}
       </div>

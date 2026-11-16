@@ -349,7 +349,7 @@ class RunManager:
             handle.finish("failed", f"unknown demo source(s): {', '.join(sorted(unknown))}")
             return
         try:
-            ok = asyncio.run(
+            asyncio.run(
                 _execute(
                     topic=request.topic,
                     question=request.question,
@@ -385,17 +385,12 @@ class RunManager:
                 (event for event in reversed(events) if event["kind"] == "run_finished"), None
             )
             if finish is not None:
-                payload = finish.get("payload", {})
-                if payload.get("termination_reason") == "completed_with_partial_sources":
-                    status = "partial"
-                elif payload.get("succeeded"):
-                    status = "completed"
-                else:
-                    status = (
-                        "cancelled"
-                        if payload.get("termination_reason") == "cancelled"
-                        else "failed"
-                    )
+                status = _status_from_finish(finish)
+                reason = {
+                    "completed": "",
+                    "partial": "one or more required sources were unavailable",
+                    "cancelled": "stopped on request",
+                }.get(status, "run did not complete successfully")
             else:
                 rejected = any(event["kind"] == "plan_rejected" for event in events)
                 event_log.emit(
@@ -409,7 +404,8 @@ class RunManager:
                     mode=request.mode,
                 )
                 status = "failed"
-            handle.finish(status, "" if ok else "run did not complete successfully")
+                reason = "run did not complete successfully"
+            handle.finish(status, reason)
         except Exception as exc:
             event_log.emit(
                 "run_failed",
@@ -467,10 +463,18 @@ class RunManager:
                 llm_request_budget=request.llm_request_budget,
             )
             with LiveCollectionLock(settings.data_dir):
+                # A-10: the webapp owns the cancellation check, between pipeline
+                # items. The RLA pipeline is not modified: breaking the async
+                # generator is a cooperative stop at the last item boundary.
+                cancelled = {"value": False}
+
                 async def run_pipeline() -> None:
                     async for item in Pipeline(settings, llm, cache, tracker).run(
                         request.topic, request.question, result
                     ):
+                        if handle.cancel_event.is_set():
+                            cancelled["value"] = True
+                            break
                         value = item.to_dict()
                         event_log.emit(
                             "research_progress",
@@ -492,6 +496,21 @@ class RunManager:
                             )
 
                 asyncio.run(run_pipeline())
+
+            if cancelled["value"]:
+                event_log.emit(
+                    "run_finished",
+                    "Research pipeline stopped on request",
+                    run_id=handle.run_id,
+                    engine="rla",
+                    mode="live",
+                    succeeded=False,
+                    cancellation_requested=True,
+                    termination_reason="cancelled",
+                    elapsed_ms=round((time.perf_counter() - pipeline_started) * 1000, 1),
+                )
+                handle.finish("cancelled", "stopped on request")
+                return
 
             answer_result = result.answer_result
             answer = getattr(answer_result, "answer", "") if answer_result else ""
@@ -826,10 +845,12 @@ def _status_from_finish(event: dict[str, Any]) -> str:
         return "unknown"
     if payload.get("termination_reason") == "completed_with_partial_sources":
         return "partial"
-    if payload.get("succeeded"):
-        return "completed"
+    # A cancellation is the recorded outcome even if the work in flight had
+    # already succeeded; otherwise a late Stop would be reported as "completed".
     if payload.get("termination_reason") == "cancelled":
         return "cancelled"
+    if payload.get("succeeded"):
+        return "completed"
     return "failed"
 
 

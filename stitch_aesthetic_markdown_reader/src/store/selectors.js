@@ -1,4 +1,12 @@
-import { describeEvent, engineLabel, isTerminal, statusTone } from "../lib/events.js";
+import {
+  answerFrom,
+  describeEvent,
+  engineLabel,
+  isTerminal,
+  statusTone,
+  workedFor,
+  workingLines,
+} from "../lib/events.js";
 
 export function selectRun(state, runId) {
   if (!runId) return null;
@@ -43,10 +51,6 @@ export function selectTurn(state, run) {
   if (!run) return null;
   const events = run.events;
   const finished = [...events].reverse().find(isTerminal);
-  const recent = events.slice(-4).map((event) => ({
-    seq: event.seq,
-    text: describeEvent(event),
-  }));
   return {
     id: run.id,
     question: run.question || run.topic || "Untitled investigation",
@@ -58,8 +62,15 @@ export function selectTurn(state, run) {
     statusReason: run.statusReason,
     stream: run.stream,
     eventCount: events.length,
-    recent,
+    // Design §5.1: capped at six lines plus "and N more"; the collapse fact
+    // comes from the terminal record, never from a wall clock.
+    working: workingLines(events),
+    answer: answerFrom(events),
+    workedFor: workedFor(events),
     finished: Boolean(finished),
+    stopping: Boolean(run.stopping) && !finished,
+    historical: Boolean(run.historical),
+    warnings: Number(run.warnings) || 0,
     sourceRunId: run.sourceRunId,
   };
 }

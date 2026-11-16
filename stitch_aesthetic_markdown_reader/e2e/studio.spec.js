@@ -113,6 +113,48 @@ test("the + menu states the live blocker, shows config facts and keeps the layou
   expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
 });
 
+test("the completed turn collapses to the recorded worked-for summary", async ({ page }) => {
+  const consoleErrors = await watch(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /run the deterministic demo/i }).click();
+
+  const article = page.getByRole("article");
+  await expect(article.getByLabel("Status: Completed")).toBeVisible({ timeout: 30_000 });
+  const workedFor = article.getByRole("button", {
+    name: /worked for .+ · \d+ steps? — open execution trace/i,
+  });
+  await expect(workedFor).toBeVisible();
+  await expect(article.locator(".working")).toHaveCount(0);
+
+  await workedFor.click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: /execution trace/i }),
+  ).toBeVisible();
+
+  expect(await cspViolations(page)).toEqual([]);
+  expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
+});
+
+test("Stop asks the runtime to cancel a live demo and reports what was recorded", async ({
+  page,
+}) => {
+  const consoleErrors = await watch(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: /run the deterministic demo/i }).click();
+
+  const stop = page.getByRole("button", { name: /^stop$/i });
+  await expect(stop).toBeVisible();
+  await stop.click();
+
+  const article = page.getByRole("article");
+  await expect(article.getByLabel("Status: Stopped")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: /^stop$/i })).toHaveCount(0);
+  await expect(article.getByRole("button", { name: /worked for/i })).toBeVisible();
+
+  expect(await cspViolations(page)).toEqual([]);
+  expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
+});
+
 for (const width of [1280, 768]) {
   test(`no horizontal page scroll at ${width}px`, async ({ page }) => {
     const consoleErrors = await watch(page);

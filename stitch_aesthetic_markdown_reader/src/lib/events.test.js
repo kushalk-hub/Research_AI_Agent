@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   STATUS_LABEL,
+  answerFrom,
+  countPhases,
   describeEvent,
   finishReason,
   modeLabel,
+  phaseLabel,
   phaseOf,
   statusFromFinish,
   statusLabel,
   statusTone,
+  workedFor,
+  workingLines,
 } from "./events.js";
 import { formatDuration, redactText, relativeTime, shorten } from "./format.js";
 
@@ -25,6 +30,8 @@ describe("run status", () => {
     expect(STATUS_LABEL).not.toHaveProperty("abstained");
     expect(statusLabel("abstained")).toBe("Unknown");
     expect(statusTone("abstained")).toBe("muted");
+    expect(statusLabel("stopping")).toBe("Stopping");
+    expect(statusTone("stopping")).toBe("warn");
   });
 
   it("labels replay and simulation honestly", () => {
@@ -90,6 +97,107 @@ describe("phaseOf", () => {
     expect(phaseOf({ kind: "task_started", payload: { phase: "write" } })).toBe("write");
     expect(phaseOf({ kind: "queue_updated" })).toBe("queue");
     expect(phaseOf({ kind: "citation_validation" })).toBe("validation");
+  });
+
+  it("labels known phases and humanises unknown ones", () => {
+    expect(phaseLabel("search")).toBe("Search");
+    expect(phaseLabel("")).toBe("Runtime");
+    expect(phaseLabel("brand-new")).toBe("Brand-new");
+  });
+});
+
+describe("in-thread working lines", () => {
+  function lineage(count) {
+    return Array.from({ length: count }, (_, index) => ({
+      seq: index + 1,
+      kind: "task_started",
+      message: `step ${index + 1}`,
+      payload: { phase: index % 2 === 0 ? "source" : "evidence" },
+      timestamp: 10 + index,
+    }));
+  }
+
+  it("keeps the most recent six lines and counts the rest", () => {
+    const { lines, more } = workingLines(lineage(9));
+    expect(lines).toHaveLength(6);
+    expect(more).toBe(3);
+    expect(lines[0].text).toBe("step 4");
+    expect(lines[5].text).toBe("step 9");
+    expect(lines[5].phase).toBe("source");
+  });
+
+  it("shows nothing for a finished run and ignores the terminal event itself", () => {
+    const events = [
+      ...lineage(2),
+      {
+        seq: 3,
+        kind: "run_finished",
+        message: "run completed",
+        payload: { succeeded: true, termination_reason: "completed" },
+        timestamp: 20,
+      },
+    ];
+    const { lines, more } = workingLines(events);
+    expect(lines.map((line) => line.text)).toEqual(["step 1", "step 2"]);
+    expect(more).toBe(0);
+    expect(countPhases(events)).toBe(2);
+  });
+});
+
+describe("workedFor", () => {
+  const finish = (payload) => ({
+    seq: 9,
+    kind: "run_finished",
+    message: "run completed",
+    payload,
+    timestamp: 30,
+  });
+
+  it("uses the recorded duration and stage count", () => {
+    expect(
+      workedFor([finish({ succeeded: true, elapsed_ms: 134000, stages: [{}, {}, {}] })]),
+    ).toEqual({ duration: "2m 14s", steps: 3 });
+  });
+
+  it("states an unrecorded duration instead of guessing one", () => {
+    expect(workedFor([finish({ succeeded: true })])).toEqual({ duration: "", steps: 0 });
+  });
+
+  it("returns null while the run has no terminal record", () => {
+    expect(workedFor([{ seq: 1, kind: "run_started", payload: {} }])).toBeNull();
+  });
+});
+
+describe("answerFrom", () => {
+  it("finds the recorded answer and keeps the citation evidence", () => {
+    const answer = answerFrom([
+      { seq: 1, kind: "run_started", payload: {} },
+      {
+        seq: 2,
+        kind: "research_answer",
+        message: "cited answer generated",
+        payload: {
+          answer: "  The graph holds. [P1]  ",
+          citations: ["[P1]"],
+          stripped_citations: ["[P9]"],
+          question_type: "factual",
+          evidence: [{ citation: "[P1]" }],
+        },
+      },
+    ]);
+    expect(answer).toEqual({
+      seq: 2,
+      text: "The graph holds. [P1]",
+      questionType: "factual",
+      citations: ["[P1]"],
+      evidence: [{ citation: "[P1]" }],
+      stripped: ["[P9]"],
+    });
+  });
+
+  it("returns null when no answer text was recorded", () => {
+    expect(answerFrom([])).toBeNull();
+    expect(answerFrom([{ seq: 1, kind: "research_answer", payload: { answer: "   " } }])).toBeNull();
   });
 });
 

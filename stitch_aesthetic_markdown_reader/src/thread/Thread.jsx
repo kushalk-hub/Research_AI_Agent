@@ -8,7 +8,7 @@ export default function Thread({ state, run, onFocusComposer, onOpenTrace }) {
   return (
     <div className="thread-dock">
       <div className="thread">
-        <Turn turn={turn} onOpenTrace={onOpenTrace} />
+        <Turn key={turn.id} turn={turn} onOpenTrace={onOpenTrace} />
       </div>
     </div>
   );

@@ -20,6 +20,7 @@ export const initialState = {
   error: null, // { message, code, fields }
 
   /* composer state (per session, survives navigation) */
+  composerEpoch: 0, // bumped by New investigation to clear the local textarea
   composer: {
     mode: null, // null = follow live availability; "live" | "demo"
     topic: "", // "" = derive from the question
@@ -39,6 +40,25 @@ export const initialState = {
 function upsertOrder(order, runId) {
   if (order.includes(runId)) return order;
   return [runId, ...order];
+}
+
+const EMPTY_OVERRIDES = Object.freeze({
+  paper_limit: null,
+  provider_wait_seconds: null,
+  llm_request_budget: null,
+  concurrency: null,
+  source_limit: null,
+});
+
+function resetComposer(composer) {
+  return {
+    ...composer,
+    topic: "",
+    menuOpen: false,
+    advancedOpen: false,
+    overrides: { ...EMPTY_OVERRIDES },
+    allowBudgetOverride: false,
+  };
 }
 
 export function reducer(state, action) {
@@ -83,8 +103,13 @@ export function reducer(state, action) {
         question: request?.question || "",
         status: handle.status || "starting",
         statusReason: "",
+        stopping: false,
+        historical: Boolean(handle.historical),
+        warnings: Number(handle.warnings) || 0,
+        pipeline: handle.pipeline || "",
         stream: "connecting",
         openedAt: previous?.openedAt || Date.now(),
+        startedAt: previous?.startedAt || null,
         endedAt: null,
         events: previous?.events || [],
       };
@@ -112,6 +137,62 @@ export function reducer(state, action) {
       return {
         ...state,
         runs: { ...state.runs, [action.runId]: { ...run, stream: action.stream } },
+      };
+    }
+
+    case "run/info": {
+      // Reconciliation with GET /api/runs/<id> (design §3: "status is derived,
+      // never stored twice"). Two guards keep a late fetch honest:
+      //  - a terminal event already in the stream is the stronger record;
+      //  - a fetch that started before the stream cannot walk a status back
+      //    (`running` does not become `starting` under a live event list).
+      const run = state.runs[action.runId];
+      if (!run) return state;
+      const info = action.info || {};
+      const streamed = run.events.some(isTerminal);
+      const infoStatus = String(info.status || "");
+      const settled = ["completed", "partial", "failed", "cancelled", "replayed", "interrupted"];
+      const acceptStatus =
+        !streamed && Boolean(infoStatus) && (run.events.length === 0 || settled.includes(infoStatus));
+      const startedAt = info.started_at ? Math.round(Number(info.started_at) * 1000) : null;
+      const endedAt = info.ended_at ? Math.round(Number(info.ended_at) * 1000) : null;
+      return {
+        ...state,
+        runs: {
+          ...state.runs,
+          [action.runId]: {
+            ...run,
+            status: acceptStatus ? infoStatus : run.status,
+            statusReason: acceptStatus
+              ? info.status_reason ?? run.statusReason
+              : run.statusReason,
+            startedAt: run.startedAt ?? (Number.isFinite(startedAt) ? startedAt : null),
+            endedAt: run.endedAt ?? (Number.isFinite(endedAt) ? endedAt : null),
+            historical: Boolean(info.historical) || run.historical,
+            warnings: Number.isFinite(Number(info.warnings))
+              ? Number(info.warnings)
+              : run.warnings,
+            pipeline: info.pipeline || run.pipeline,
+          },
+        },
+      };
+    }
+
+    case "run/stop-requested": {
+      const run = state.runs[action.runId];
+      if (!run) return state;
+      return {
+        ...state,
+        runs: { ...state.runs, [action.runId]: { ...run, stopping: true } },
+      };
+    }
+
+    case "run/stop-rejected": {
+      const run = state.runs[action.runId];
+      if (!run) return state;
+      return {
+        ...state,
+        runs: { ...state.runs, [action.runId]: { ...run, stopping: false } },
       };
     }
 
@@ -172,19 +253,7 @@ export function reducer(state, action) {
     case "composer/reset":
       return {
         ...state,
-        composer: {
-          ...state.composer,
-          topic: "",
-          advancedOpen: false,
-          overrides: {
-            paper_limit: null,
-            provider_wait_seconds: null,
-            llm_request_budget: null,
-            concurrency: null,
-            source_limit: null,
-          },
-          allowBudgetOverride: false,
-        },
+        composer: resetComposer(state.composer),
       };
 
     case "ui/error":
@@ -197,7 +266,18 @@ export function reducer(state, action) {
       return { ...state, error: null };
 
     case "ui/new-investigation":
-      return { ...state, activeRunId: null, error: null, page: "research" };
+      // New investigation clears the conversation, not the mode: the operator's
+      // choice of Live or Demo survives, because it is a preference, not input.
+      // `composerEpoch` is what tells the local textarea to drop its text (the
+      // text is not in the store, so a store reset alone cannot clear it).
+      return {
+        ...state,
+        activeRunId: null,
+        error: null,
+        page: "research",
+        composerEpoch: state.composerEpoch + 1,
+        composer: resetComposer(state.composer),
+      };
 
     default:
       return state;
@@ -229,6 +309,9 @@ export function applyEvents(run, incoming) {
         statusReason: finishReason(payload),
         endedAt: event.timestamp ? Math.round(event.timestamp * 1000) : Date.now(),
         stream: "idle",
+        // The recorded outcome replaces the optimistic "Stopping…" chip: the
+        // UI must not keep claiming a stop is pending after it happened.
+        stopping: false,
       };
     }
   }

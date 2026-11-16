@@ -78,12 +78,124 @@ describe("run lifecycle", () => {
   });
 });
 
+describe("status reconciliation", () => {
+  it("takes the recorded status from GET /api/runs/<id>", () => {
+    const state = reducer(opened(), {
+      type: "run/info",
+      runId: handle.run_id,
+      info: {
+        status: "completed",
+        status_reason: "completed",
+        historical: true,
+        pipeline: "rla-phases",
+        warnings: 2,
+        started_at: 1_700_000_000,
+        ended_at: 1_700_000_010,
+      },
+    });
+    const run = state.runs[handle.run_id];
+    expect(run.status).toBe("completed");
+    expect(run.historical).toBe(true);
+    expect(run.pipeline).toBe("rla-phases");
+    expect(run.warnings).toBe(2);
+    expect(run.startedAt).toBe(1_700_000_000_000);
+    expect(run.endedAt).toBe(1_700_000_010_000);
+  });
+
+  it("never lets a late fetch overwrite a terminal event already streamed", () => {
+    let state = reducer(opened(), {
+      type: "run/events",
+      runId: handle.run_id,
+      events: [
+        { seq: 1, kind: "run_started", payload: {} },
+        {
+          seq: 2,
+          kind: "run_finished",
+          timestamp: 1_700_000_000,
+          payload: { succeeded: false, termination_reason: "cancelled" },
+        },
+      ],
+    });
+    state = reducer(state, {
+      type: "run/info",
+      runId: handle.run_id,
+      info: { status: "running", status_reason: "" },
+    });
+    expect(state.runs[handle.run_id].status).toBe("cancelled");
+    expect(state.runs[handle.run_id].statusReason).toBe("cancelled");
+  });
+});
+
+describe("stop", () => {
+  function cancelled() {
+    return reducer(opened(), {
+      type: "run/events",
+      runId: handle.run_id,
+      events: [
+        { seq: 1, kind: "run_started", payload: {} },
+        {
+          seq: 2,
+          kind: "run_finished",
+          timestamp: 1_700_000_000,
+          payload: { succeeded: false, termination_reason: "cancelled" },
+        },
+      ],
+    });
+  }
+
+  it("marks a requested stop and clears it when the request is rejected", () => {
+    const requested = reducer(opened(), { type: "run/stop-requested", runId: handle.run_id });
+    expect(requested.runs[handle.run_id].stopping).toBe(true);
+    const rejected = reducer(requested, { type: "run/stop-rejected", runId: handle.run_id });
+    expect(rejected.runs[handle.run_id].stopping).toBe(false);
+  });
+
+  it("clears the pending flag as soon as the recorded outcome arrives", () => {
+    let state = reducer(opened(), { type: "run/stop-requested", runId: handle.run_id });
+    state = reducer(state, {
+      type: "run/events",
+      runId: handle.run_id,
+      events: [{ seq: 1, kind: "run_started", payload: {} }],
+    });
+    // A non-terminal batch must not pretend the stop happened.
+    expect(state.runs[handle.run_id].stopping).toBe(true);
+    state = reducer(state, {
+      type: "run/events",
+      runId: handle.run_id,
+      events: [
+        {
+          seq: 2,
+          kind: "run_finished",
+          timestamp: 1_700_000_000,
+          payload: { succeeded: false, termination_reason: "cancelled" },
+        },
+      ],
+    });
+    expect(state.runs[handle.run_id].stopping).toBe(false);
+    expect(state.runs[handle.run_id].status).toBe("cancelled");
+    expect(cancelled().runs[handle.run_id].status).toBe("cancelled");
+  });
+});
+
 describe("workspace actions", () => {
   it("clears the active run on New investigation", () => {
     const state = reducer(opened(), { type: "ui/new-investigation" });
     expect(state.activeRunId).toBeNull();
     expect(state.page).toBe("research");
     expect(state.runs[handle.run_id]).toBeDefined();
+  });
+
+  it("clears the local composer on New investigation but keeps the chosen mode", () => {
+    let state = opened();
+    state = reducer(state, { type: "composer/mode", mode: "demo" });
+    state = reducer(state, { type: "composer/topic", topic: "My topic" });
+    state = reducer(state, { type: "composer/override", field: "paper_limit", value: "7" });
+
+    const cleared = reducer(state, { type: "ui/new-investigation" });
+    expect(cleared.composerEpoch).toBe(state.composerEpoch + 1);
+    expect(cleared.composer.mode).toBe("demo");
+    expect(cleared.composer.topic).toBe("");
+    expect(cleared.composer.overrides.paper_limit).toBeNull();
   });
 
   it("ignores selecting a run this tab has not opened", () => {

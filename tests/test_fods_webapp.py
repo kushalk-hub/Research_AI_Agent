@@ -1038,3 +1038,97 @@ def test_a_configured_dev_origin_is_allowed(tmp_path, monkeypatch):
     assert _origin_allowed("http://127.0.0.1:9999", 8901) is False
     assert _origin_allowed("", 8901) is True
 
+
+# --- slice 4: Stop (A-10) ---------------------------------------------------
+
+
+def test_a_cancelled_run_is_reported_as_cancelled_even_if_work_succeeded():
+    finish = {
+        "kind": "run_finished",
+        "payload": {"succeeded": True, "termination_reason": "cancelled"},
+    }
+    assert webapp._status_from_finish(finish) == "cancelled"
+
+
+def test_stop_cancels_a_running_demo_and_the_record_says_so(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    handle, _duplicate = manager.start(
+        NewRun(
+            topic="Stop the demo",
+            question="Does Stop stop a running deterministic demo?",
+            mode="simulate",
+            planner="fixture",
+            delay_ms=200,
+        ),
+        idempotency_key="stop-demo",
+    )
+    deadline = time.monotonic() + 8
+    while len(handle.events) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    handle.cancel_event.set()
+
+    while not handle.finished and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert handle.finished
+    assert handle.status == "cancelled"
+    finish = [event for event in handle.events if event["kind"] == "run_finished"][-1]
+    assert finish["payload"]["termination_reason"] == "cancelled"
+    assert finish["payload"]["cancellation_requested"] is True
+
+
+def test_rla_cancel_stops_between_pipeline_items_and_records_it(tmp_path, monkeypatch):
+    import contextlib
+    import types
+
+    manager = RunManager(_settings(tmp_path))
+    request = NewRun(
+        topic="Cancel the literature run",
+        question="Does Stop stop the literature pipeline?",
+        engine="rla",
+        mode="live",
+        planner="ollama",
+        llm_request_budget=1,
+    )
+    handle = RunHandle("0123456789ab", "live", request.topic)
+    event_log = EventLog(handle.event_path, handle.publish)
+    consumed = {"items": 0}
+
+    class FakePipeline:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def run(self, *_args, **_kwargs):
+            for index in range(4):
+                consumed["items"] += 1
+                yield types.SimpleNamespace(
+                    message=f"item {index}",
+                    kind="progress",
+                    payload={"index": index},
+                    timestamp=float(index),
+                    to_dict=lambda index=index: {"phase": "search", "index": index},
+                )
+
+    monkeypatch.setattr("rla.pipeline.orchestrator.Pipeline", FakePipeline)
+    monkeypatch.setattr("rla.llm.factory.build_client", lambda *_a, **_k: object())
+    monkeypatch.setattr(
+        "rla.store.rate_limits.LiveCollectionLock",
+        lambda *_a, **_k: contextlib.nullcontext(),
+    )
+    handle.cancel_event.set()
+
+    manager._execute_research_pipeline(handle, request, event_log)
+
+    kinds = [event["kind"] for event in handle.events]
+    assert kinds == ["run_started", "run_finished"]
+    # The generator yields one item to the loop, then the check stops it before
+    # that item is recorded or the next one is requested.
+    assert consumed["items"] == 1
+    assert not any(event["kind"] == "research_progress" for event in handle.events)
+    finish = handle.events[-1]["payload"]
+    assert finish["termination_reason"] == "cancelled"
+    assert finish["cancellation_requested"] is True
+    assert finish["succeeded"] is False
+    assert handle.status == "cancelled"
+
+

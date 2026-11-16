@@ -589,6 +589,12 @@
   font-weight: 600;
 }
 
+.working {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
 .working-list {
   display: flex;
   flex-direction: column;
@@ -601,19 +607,89 @@
 }
 
 .working-list li {
-  display: flex;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
   align-items: baseline;
   gap: var(--sp-2);
   overflow-wrap: anywhere;
 }
 
-.working-list li::before {
-  content: "·";
-  color: var(--line-strong);
+.working-phase {
+  color: var(--blocked);
+  font-size: var(--fs-1);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.working-text {
+  color: inherit;
 }
 
 .working-list li:last-child {
   color: var(--ink);
+}
+
+.working-more {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-1);
+}
+
+/* ---------- Answer card ---------- */
+
+.answer-card {
+  margin-top: var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-2);
+  background: var(--surface-2);
+}
+
+.answer-label {
+  margin: 0 0 var(--sp-2);
+  color: var(--accent);
+  font-size: var(--fs-1);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.answer-text {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-reading);
+  font-size: var(--fs-4);
+  line-height: var(--lh-4);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.answer-note {
+  margin: var(--sp-3) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-2);
+}
+
+.worked-for {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stop is a secondary, potentially destructive action: the warn tone makes it
+   visibly different from Send without pretending it already worked. */
+.stop-btn {
+  border-color: var(--line-strong);
+  color: var(--warn);
+}
+
+.stop-btn:hover:not(:disabled) {
+  background: var(--warn-weak);
+  border-color: var(--warn);
+}
+
+.stop-btn:disabled {
+  color: var(--muted);
+  opacity: 1;
 }
 
 .turn-note {

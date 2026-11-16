@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef } from "react";
 import { api } from "../api/client.js";
 import Composer from "../composer/Composer.jsx";
 import { useStartRun } from "../composer/useStartRun.js";
+import { useStopRun } from "../composer/useStopRun.js";
+import { isTerminal } from "../lib/events.js";
 import { selectActiveRun, selectRecents } from "../store/selectors.js";
 import { useDispatch, useStore } from "../store/store.jsx";
 import { useRunStream } from "../store/useRunStream.js";
@@ -18,6 +20,7 @@ export default function App() {
   const dispatch = useDispatch();
   const inputRef = useRef(null);
   const { replay, busy, error: replayError, clearError } = useStartRun();
+  const { stop } = useStopRun();
 
   const activeRun = selectActiveRun(state);
   const recents = selectRecents(state);
@@ -72,10 +75,27 @@ export default function App() {
     inputRef.current?.focus();
   }, [dispatch]);
 
-  const newInvestigation = useCallback(() => {
+  const newInvestigation = useCallback(async () => {
+    // Closing the stream while the run keeps burning quota would be dishonest.
+    // A live run is stopped first; if the request fails the conversation stays
+    // visible and the banner explains why.
+    const active = state.runs[state.activeRunId];
+    const live =
+      active &&
+      !active.historical &&
+      active.kind !== "replay" &&
+      (active.stream === "live" ||
+        active.stream === "connecting" ||
+        active.status === "running" ||
+        active.status === "starting") &&
+      !active.events.some(isTerminal);
+    if (live && !active.stopping) {
+      const result = await stop(active.id);
+      if (!result.ok) return;
+    }
     dispatch({ type: "ui/new-investigation" });
     inputRef.current?.focus();
-  }, [dispatch]);
+  }, [state.runs, state.activeRunId, stop, dispatch]);
 
   useEffect(() => {
     function onKeyDown(event) {
@@ -129,7 +149,10 @@ export default function App() {
             <h1>{route.label}</h1>
             {activeRun && (
               <>
-                <StatusChip status={activeRun.status} reason={activeRun.statusReason} />
+                <StatusChip
+                  status={activeRun.stopping ? "stopping" : activeRun.status}
+                  reason={activeRun.statusReason}
+                />
                 <code className="mono">{activeRun.id}</code>
               </>
             )}
@@ -149,6 +172,19 @@ export default function App() {
           <div className="banner-error" role="alert">
             <strong>{replayError.message}</strong>
             <button type="button" className="btn btn--ghost btn--sm" onClick={clearError}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {state.error && (
+          <div className="banner-error" role="alert">
+            <strong>{state.error.message}</strong>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => dispatch({ type: "ui/clear-error" })}
+            >
               Dismiss
             </button>
           </div>

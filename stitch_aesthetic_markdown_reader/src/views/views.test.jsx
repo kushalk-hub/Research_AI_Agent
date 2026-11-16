@@ -69,18 +69,26 @@ describe("Turn", () => {
     statusReason: "",
     stream: "error",
     eventCount: 2,
-    recent: [
-      { seq: 1, text: "run started" },
-      { seq: 2, text: "task failed" },
-    ],
+    working: {
+      lines: [
+        { seq: 1, phase: "runtime", text: "run started" },
+        { seq: 2, phase: "task", text: "task failed" },
+      ],
+      more: 0,
+    },
+    answer: null,
+    workedFor: { duration: "1.2 s", steps: 2 },
     finished: true,
+    stopping: false,
+    historical: false,
+    warnings: 0,
   };
 
-  it("shows the real status, the recent recorded lines and the disconnect honestly", () => {
+  it("shows the real status, the recorded collapse and the disconnect honestly", () => {
     const onOpenTrace = vi.fn();
     render(<Turn turn={turn} onOpenTrace={onOpenTrace} />);
     expect(screen.getByText("Failed")).toBeTruthy();
-    expect(screen.getByText("task failed")).toBeTruthy();
+    expect(screen.getByText("Worked for 1.2 s · 2 steps")).toBeTruthy();
     expect(screen.getByText(/event stream disconnected/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /open execution trace/i }));
     expect(onOpenTrace).toHaveBeenCalledTimes(1);

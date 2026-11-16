@@ -1,6 +1,6 @@
-import { ArrowUp, Play, Plus } from "lucide-react";
+import { ArrowUp, Play, Plus, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { engineLabel, modeLabel } from "../lib/events.js";
+import { engineLabel, isTerminal, modeLabel } from "../lib/events.js";
 import { useDispatch, useStore } from "../store/store.jsx";
 import ComposerMenu from "./ComposerMenu.jsx";
 import {
@@ -11,6 +11,7 @@ import {
   validate,
 } from "./model.js";
 import { useStartRun } from "./useStartRun.js";
+import { useStopRun } from "./useStopRun.js";
 
 /** The composer and its `+` menu.
  *
@@ -29,6 +30,24 @@ export default function Composer({ config, inputRef }) {
   const [touched, setTouched] = useState(false);
   const plusRef = useRef(null);
   const { start, busy, error, clearError } = useStartRun();
+  const { stop } = useStopRun();
+
+  const activeRun = state.activeRunId ? state.runs[state.activeRunId] : null;
+  // A-10: Stop is offered only where it can work. A replay is not a live run
+  // (the original may be long finished), and a run read from disk has no
+  // process to cancel, so the button is hidden rather than shown as a no-op.
+  const stoppable = Boolean(
+    activeRun &&
+      !activeRun.historical &&
+      activeRun.kind !== "replay" &&
+      !activeRun.events.some(isTerminal),
+  );
+  const stopping = Boolean(activeRun?.stopping);
+
+  async function onStop() {
+    if (!activeRun) return;
+    await stop(activeRun.id);
+  }
 
   const composer = state.composer;
   const mode = composer.mode ?? defaultMode(config);
@@ -126,6 +145,13 @@ export default function Composer({ config, inputRef }) {
       : !canSend && Object.keys(errors).length > 0
         ? "Fix the highlighted settings first."
         : "Start the run (Enter)";
+
+  // New investigation bumps `composerEpoch`. The question text lives in this
+  // component, so a store-only reset could not clear it.
+  useEffect(() => {
+    setText("");
+    setTouched(false);
+  }, [state.composerEpoch]);
 
   const questionError = touched && text.trim().length > 0 ? withServer.errors.question : "";
 
@@ -278,6 +304,24 @@ export default function Composer({ config, inputRef }) {
           )}
 
           <span className="spacer" />
+
+          {stoppable && (
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm stop-btn"
+              onClick={onStop}
+              disabled={stopping}
+              data-tone="warn"
+              title={
+                stopping
+                  ? "Stop requested; waiting for the recorded outcome."
+                  : "Ask the local runtime to stop this run."
+              }
+            >
+              <Square size={12} aria-hidden="true" />
+              {stopping ? "Stopping…" : "Stop"}
+            </button>
+          )}
           <span className="demo-hint">Enter to send · Shift+Enter for a new line</span>
         </div>
       </form>

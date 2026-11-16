@@ -80,6 +80,12 @@ beforeEach(() => {
   vi.spyOn(api, "contexts").mockResolvedValue({ contexts: [] });
   vi.spyOn(api, "createRun").mockResolvedValue(handle);
   vi.spyOn(api, "replayRun").mockResolvedValue({ ...handle, run_kind: "replay" });
+  vi.spyOn(api, "run").mockResolvedValue({ ...handle, status: "running" });
+  vi.spyOn(api, "stopRun").mockResolvedValue({
+    run_id: handle.run_id,
+    status: "cancellation_requested",
+    code: "cancellation_requested",
+  });
 });
 
 afterEach(() => {
@@ -188,6 +194,81 @@ describe("App shell", () => {
     expect(await screen.findByText(/what should we investigate/i)).toBeTruthy();
     expect(screen.queryByRole("article")).toBeNull();
     expect(screen.getByTitle(/Deterministic demo/)).toBeTruthy();
+  });
+
+  it("reconciles the chip with GET /api/runs/<id> instead of trusting a stale start", async () => {
+    api.run.mockResolvedValue({ ...handle, status: "completed", status_reason: "completed" });
+    renderApp();
+    fireEvent.click(await screen.findByRole("button", { name: /run the deterministic demo/i }));
+
+    const turn = await screen.findByRole("article");
+    expect(await within(turn).findByText("Completed")).toBeTruthy();
+  });
+
+  it("stops a live run before New investigation closes it", async () => {
+    renderApp();
+    fireEvent.click(await screen.findByRole("button", { name: /run the deterministic demo/i }));
+    await waitFor(() => expect(FakeEventSource.last().onmessage).toBeTypeOf("function"));
+    FakeEventSource.last().emit({ seq: 1, kind: "run_started", payload: {} });
+    await screen.findByRole("article");
+
+    fireEvent.click(screen.getByRole("button", { name: /new investigation/i }));
+
+    await waitFor(() => expect(api.stopRun).toHaveBeenCalledWith(handle.run_id));
+    expect(await screen.findByText(/what should we investigate/i)).toBeTruthy();
+    expect(FakeEventSource.last().closed).toBe(true);
+  });
+
+  it("shows Stop for a live run, marks the request, and stops claiming it once recorded", async () => {
+    renderApp();
+    fireEvent.click(await screen.findByRole("button", { name: /run the deterministic demo/i }));
+    await waitFor(() => expect(FakeEventSource.last().onmessage).toBeTypeOf("function"));
+    FakeEventSource.last().emit({ seq: 1, kind: "run_started", payload: {} });
+
+    const turn = await screen.findByRole("article");
+    fireEvent.click(screen.getByRole("button", { name: /^stop$/i }));
+
+    await waitFor(() => expect(api.stopRun).toHaveBeenCalledTimes(1));
+    expect(await within(turn).findByText("Stopping")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /stopping…/i }).disabled).toBe(true);
+
+    FakeEventSource.last().emit({
+      seq: 2,
+      kind: "run_finished",
+      payload: { succeeded: false, termination_reason: "cancelled", cancellation_requested: true },
+    });
+
+    expect(await within(turn).findByText("Stopped")).toBeTruthy();
+    expect(within(turn).queryByText("Stopping")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+  });
+
+  it("hides Stop for a replay, where there is no live process to cancel", async () => {
+    api.history.mockResolvedValue({
+      runs: [
+        {
+          run_id: "fedcba987654",
+          topic: "Recorded topic",
+          mode: "live",
+          status: "completed",
+          event_count: 3,
+          started_at: 1_700_000_000,
+        },
+      ],
+    });
+    api.replayRun.mockResolvedValue({
+      ...handle,
+      run_id: "fedcba987654",
+      run_kind: "replay",
+      source_run_id: handle.run_id,
+    });
+
+    renderApp();
+    fireEvent.click(await screen.findByTitle(/Recorded topic/));
+
+    const turn = await screen.findByRole("article");
+    expect(within(turn).getByText("Replay")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
   });
 
   it("cycles the theme on the document element, never through an inline style", async () => {
