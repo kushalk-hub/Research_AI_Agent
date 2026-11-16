@@ -6,6 +6,7 @@ from threading import Event
 
 import pytest
 
+from fods.events import EventLog
 from fods.fixtures import FIXTURE_PAPERS
 from fods.models import TaskPlan
 from fods.plan import PlanError, validate_plan
@@ -74,6 +75,36 @@ def test_cycle_is_rejected_before_any_tool_call(tmp_path):
         asyncio.run(run_plan(plan, registry, _context(tmp_path)))
 
     assert calls == 0
+
+
+def test_rejected_plan_still_records_a_terminal_event(tmp_path):
+    """A-01: a run that started must record how it ended, even when rejected."""
+    registry = _registry()
+    plan = _plan()
+    plan.tasks[0].depends_on = [plan.tasks[1].id]
+    plan.tasks[1].depends_on = [plan.tasks[0].id]
+    log = EventLog()
+
+    with pytest.raises(PlanError, match="dependency cycle"):
+        asyncio.run(run_plan(plan, registry, _context(tmp_path), event_log=log))
+
+    kinds = [event.kind for event in log.events]
+    assert kinds.count("run_finished") == 1
+    assert "plan_rejected" in kinds
+    finished = log.events[kinds.index("run_finished")]
+    assert finished.payload["termination_reason"] == "plan_rejected"
+    assert finished.payload["succeeded"] is False
+    assert finished.duration_ms is None
+    assert finished.payload["elapsed_ms"] >= 0
+
+
+def test_a_completed_run_records_exactly_one_terminal_event(tmp_path):
+    log = EventLog()
+    asyncio.run(run_plan(_plan(), _registry(), _context(tmp_path), event_log=log))
+
+    terminal = [event for event in log.events if event.kind == "run_finished"]
+    assert len(terminal) == 1
+    assert terminal[0].payload["succeeded"] is True
 
 
 def test_normal_research_runtime_never_calls_graph_mutations(tmp_path, monkeypatch):

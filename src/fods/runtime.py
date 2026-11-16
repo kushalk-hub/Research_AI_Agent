@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import heapq
 import time
 import uuid
@@ -147,6 +148,55 @@ def make_queue(policy: str) -> FifoQueue | PriorityQueue:
     raise ValueError("schedule must be 'fifo' or 'priority'")
 
 
+def _guarantees_terminal_event(runner: Callable[..., Any]) -> Callable[..., Any]:
+    """Emit exactly one `run_finished`, whatever way the plan exits.
+
+    A-01: a run that starts must record how it ended. The normal path emits the
+    terminal event itself; this wrapper only fills the gap on raising paths
+    (today: `plan_rejected`) and never adds a second one. The log is the same
+    object the body writes to, so the guarantee lands on disk and in the stream.
+    """
+
+    @functools.wraps(runner)
+    async def wrapper(
+        plan: TaskPlan,
+        registry: ToolRegistry,
+        context: ToolContext,
+        *,
+        event_path: Path | None = None,
+        event_sink: Callable[[Any], None] | None = None,
+        event_log: EventLog | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        if event_log is not None and (event_path is not None or event_sink is not None):
+            raise ValueError("pass event_log or event_path/event_sink, not both")
+        log = event_log if event_log is not None else EventLog(event_path, event_sink)
+        started = time.perf_counter()
+        try:
+            return await runner(plan, registry, context, event_log=log, **kwargs)
+        finally:
+            if not any(item.kind == "run_finished" for item in log.events):
+                rejected = any(item.kind == "plan_rejected" for item in log.events)
+                cancelled = bool(kwargs.get("cancel_event") and kwargs["cancel_event"].is_set())
+                log.emit(
+                    "run_finished",
+                    "plan rejected before tools executed"
+                    if rejected
+                    else "run finished without recording a terminal event",
+                    succeeded=False,
+                    termination_reason="plan_rejected"
+                    if rejected
+                    else "cancelled"
+                    if cancelled
+                    else "failed",
+                    mode=context.mode,
+                    elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
+                )
+
+    return wrapper
+
+
+@_guarantees_terminal_event
 async def run_plan(
     plan: TaskPlan,
     registry: ToolRegistry,

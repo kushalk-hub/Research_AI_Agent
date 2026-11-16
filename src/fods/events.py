@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from fods.event_meta import describe
 from fods.safety import safe_value
 
 
@@ -19,9 +20,21 @@ class RuntimeEvent:
     message: str
     payload: dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
+    # Optional display enrichment (design §6 row 1). Written for every new event;
+    # absent from the 82 logs recorded before it existed, which is why the UI
+    # keeps its own `describeEvent()` fallback.
+    summary: str | None = None
+    phase: str | None = None
+    # `class` is a Python keyword, so the attribute is `event_class` and the wire
+    # key stays `class` (see `to_dict`).
+    event_class: str | None = None
+    severity: str | None = None
+    duration_ms: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        value["class"] = value.pop("event_class")
+        return value
 
 
 class EventLog:
@@ -37,11 +50,14 @@ class EventLog:
             self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def emit(self, kind: str, message: str, **payload: Any) -> RuntimeEvent:
+        safe_message = safe_value(message)
+        safe_payload = safe_value(payload)
         event = RuntimeEvent(
             len(self.events) + 1,
             kind,
-            safe_value(message),
-            safe_value(payload),
+            safe_message,
+            safe_payload,
+            **describe(kind, safe_message, safe_payload),
         )
         self.events.append(event)
         if self.path is not None:

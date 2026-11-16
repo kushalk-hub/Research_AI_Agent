@@ -21,11 +21,13 @@ from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from fods.event_meta import PHASE_LABEL
 from fods.events import EventLog, read_events
 from fods.fixtures import FIXTURE_PAPERS
 from fods.safety import redact_text, safe_value
 from fods.visualize import write_run_html
 from rla.config import Settings, get_settings
+from rla.events import PIPELINE_PHASES
 
 WEB_ROOT = Path(__file__).with_name("web")
 RUN_ID = re.compile(r"^[0-9a-f]{12}$")
@@ -425,14 +427,17 @@ class RunManager:
         settings.ensure_dirs()
         cache = Cache(settings.cache_db)
         tracker = CostTracker()
+        pipeline_started = time.perf_counter()
         try:
             llm = build_client(settings, cache, tracker)
             result = PipelineResult()
-            event_log.emit(
+            started_event = event_log.emit(
                 "run_started",
                 "Full literature pipeline started",
                 run_id=handle.run_id,
                 engine="rla",
+                pipeline="rla-phases",
+                pipeline_stages=_rla_stages(),
                 mode="live",
                 topic=request.topic,
                 question=request.question,
@@ -525,7 +530,9 @@ class RunManager:
                 mode="live",
                 succeeded=complete,
                 termination_reason=termination_reason,
-                elapsed_ms=None,
+                elapsed_ms=round((time.perf_counter() - pipeline_started) * 1000, 1),
+                failed_sources=sorted(source_failures) if isinstance(source_failures, dict) else [],
+                stages=_stage_timings(event_log.events, started_event.timestamp),
                 paper_count=paper_count,
                 extracted_count=extracted,
                 graph_built=graph_ok,
@@ -544,6 +551,7 @@ class RunManager:
                 mode="live",
                 succeeded=False,
                 termination_reason="already_running",
+                elapsed_ms=round((time.perf_counter() - pipeline_started) * 1000, 1),
             )
             handle.finish("failed", str(exc))
         except Exception as exc:
@@ -562,7 +570,9 @@ class RunManager:
                 mode="live",
                 succeeded=False,
                 termination_reason="failed",
+                elapsed_ms=round((time.perf_counter() - pipeline_started) * 1000, 1),
             )
+
             handle.finish("failed", f"{type(exc).__name__}: {exc}")
 
     def get(self, run_id: str) -> RunHandle | None:
@@ -676,6 +686,24 @@ class RunManager:
             return None
         return target.read_text(encoding="utf-8")
 
+    def brief_document(self, run_id: str, markdown: str) -> dict[str, Any]:
+        """Machine-readable brief: the Markdown plus the recorded citations and sources."""
+        handle = self.get(run_id)
+        events = handle.events if handle else []
+        if not events and RUN_ID.fullmatch(run_id):
+            path = self.runs_dir / f"{run_id}.jsonl"
+            if path.is_file():
+                events = read_events(path)
+        answer = _last_event(events, "research_answer") or _last_event(events, "answer_ready") or {}
+        payload = answer.get("payload", {})
+        citations = payload.get("citations") or payload.get("evidence_citations") or []
+        return {
+            "run_id": run_id,
+            "markdown": markdown,
+            "citations": citations if isinstance(citations, list) else [],
+            "sources": _sources_from(events),
+        }
+
 
 def _status_from_finish(event: dict[str, Any]) -> str:
     payload = event.get("payload", {})
@@ -688,6 +716,71 @@ def _status_from_finish(event: dict[str, Any]) -> str:
     if payload.get("termination_reason") == "cancelled":
         return "cancelled"
     return "failed"
+
+
+def _rla_stages() -> list[dict[str, Any]]:
+    """The labelled RLA phase rail (design §4.1, UI-07)."""
+    return [
+        {
+            "id": str(phase),
+            "label": PHASE_LABEL.get(str(phase), str(phase).title()),
+            "order": index,
+        }
+        for index, phase in enumerate(PIPELINE_PHASES)
+    ]
+
+
+def _stage_timings(events: list[Any], start_ts: float) -> list[dict[str, Any]]:
+    """Per-phase start offset and duration, from the recorded progress events.
+
+    Nothing is estimated: a phase with no progress event is absent rather than
+    shown as zero.
+    """
+    starts: dict[str, float] = {}
+    ends: dict[str, float] = {}
+    for item in events:
+        if getattr(item, "kind", "") != "research_progress":
+            continue
+        phase = str(item.payload.get("phase") or "")
+        if not phase:
+            continue
+        starts.setdefault(phase, item.timestamp)
+        ends[phase] = item.timestamp
+    return [
+        {
+            "id": phase,
+            "started_ms": round((starts[phase] - start_ts) * 1000, 1),
+            "duration_ms": round((ends[phase] - starts[phase]) * 1000, 1),
+        }
+        for phase in sorted(starts, key=lambda name: starts[name])
+    ]
+
+
+def _first_event(events: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
+    return next((event for event in events if event.get("kind") == kind), None)
+
+
+def _last_event(events: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
+    return next((event for event in reversed(events) if event.get("kind") == kind), None)
+
+
+def _sources_from(events: list[dict[str, Any]]) -> list[str]:
+    """Source names the run actually used, from the recorded context or papers."""
+    names: set[str] = set()
+    for event in events:
+        payload = event.get("payload", {})
+        if event.get("kind") == "context_ready":
+            names.update(str(name) for name in payload.get("source_names") or [] if name)
+        if event.get("kind") == "research_papers":
+            for paper in payload.get("papers") or []:
+                if not isinstance(paper, dict):
+                    continue
+                for name in paper.get("sources") or []:
+                    if name:
+                        names.add(str(name))
+                if paper.get("source"):
+                    names.add(str(paper["source"]))
+    return sorted(names)
 
 
 def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager | None = None):
@@ -786,12 +879,22 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                 return self._events(manager, match.group(1), parse_qs(parsed.query))
             match = re.fullmatch(r"/api/runs/([0-9a-f]{12})/brief", path)
             if match:
-                brief = manager.brief(match.group(1))
+                query = parse_qs(parsed.query)
+                run_id = match.group(1)
+                brief = manager.brief(run_id)
                 if brief is None:
-                    return self._json(404, {"error": "no saved brief for this run"})
+                    return self._json(
+                        404, {"error": "no saved brief for this run", "code": "not_found"}
+                    )
+                if query.get("format", [""])[0] == "json":
+                    return self._json(200, manager.brief_document(run_id, brief))
                 body = brief.encode("utf-8")
                 self.send_response(200)
                 self._headers("text/markdown; charset=utf-8", len(body))
+                if query.get("download", ["0"])[0] in {"1", "true", "yes"}:
+                    self.send_header(
+                        "Content-Disposition", f'attachment; filename="{run_id}.md"'
+                    )
                 self.end_headers()
                 return self.wfile.write(body)
             match = re.fullmatch(r"/api/runs/([0-9a-f]{12})/visualization", path)
@@ -835,6 +938,7 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
             index = 0
+            status_reason = ""
             try:
                 while True:
                     with handle.condition:
@@ -845,14 +949,30 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                                 self.wfile.flush()
                         pending = handle.events[index:]
                         finished = handle.finished
+                        status = handle.status
                     for event in pending:
                         index += 1
                         event_id = int(event.get("seq", index))
                         if event_id <= after:
                             continue
+                        if event.get("kind") == "run_finished":
+                            status_reason = str(
+                                event.get("payload", {}).get("termination_reason") or ""
+                            )
+                            # The handle's own status is updated just after the
+                            # event is published, so the terminal envelope must
+                            # carry the recorded outcome rather than a stale
+                            # "starting".
+                            status = (
+                                "replayed"
+                                if handle.run_kind == "replay"
+                                else _status_from_finish(event)
+                            )
                         envelope = {
                             "run_kind": handle.run_kind,
                             "source_run_id": handle.source_run_id or None,
+                            "status": status,
+                            "status_reason": status_reason,
                             "event": event,
                         }
                         data = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
@@ -871,7 +991,11 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                     request = NewRun.model_validate(value)
                     if request.reuse_context and request.planner == "ollama":
                         return self._json(
-                            400, {"error": "saved-context runs use the deterministic planner"}
+                            400,
+                            {
+                                "error": "saved-context runs use the deterministic planner",
+                                "code": "invalid_request",
+                            },
                         )
                     handle, duplicate = manager.start(
                         request, self.headers.get("Idempotency-Key", "")
@@ -882,7 +1006,7 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                     speed = int(value.get("speed_ms", 30))
                     handle = manager.replay(run_id, max(0, min(speed, 250)))
                     return self._json(202, _handle_info(handle))
-                return self._json(404, {"error": "not found"})
+                return self._json(404, {"error": "not found", "code": "not_found"})
             except BudgetOverrideRequired as exc:
                 return self._json(
                     400,
@@ -890,14 +1014,19 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                 )
             except ValidationError as exc:
                 return self._json(
-                    400, {"error": "invalid run request", "fields": exc.errors(include_url=False)}
+                    400,
+                    {
+                        "error": "invalid run request",
+                        "code": "validation",
+                        "fields": exc.errors(include_url=False),
+                    },
                 )
             except FileExistsError as exc:
-                return self._json(409, {"error": str(exc)})
+                return self._json(409, {"error": str(exc), "code": "conflict"})
             except (ValueError, json.JSONDecodeError) as exc:
-                return self._json(400, {"error": str(exc)})
+                return self._json(400, {"error": str(exc), "code": "invalid_request"})
             except FileNotFoundError as exc:
-                return self._json(404, {"error": str(exc)})
+                return self._json(404, {"error": str(exc), "code": "not_found"})
 
         def do_DELETE(self) -> None:  # noqa: N802
             match = re.fullmatch(r"/api/runs/([0-9a-f]{12})", urlparse(self.path).path)
@@ -915,6 +1044,24 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
 
 
 def _handle_info(handle: RunHandle) -> dict[str, Any]:
+    events = handle.events
+    started = _first_event(events, "run_started") or {}
+    finish = _last_event(events, "run_finished") or {}
+    start_payload = started.get("payload", {})
+    finish_payload = finish.get("payload", {})
+    started_at = started.get("timestamp")
+    ended_at = finish.get("timestamp")
+    elapsed_ms = finish_payload.get("elapsed_ms")
+    if elapsed_ms is None and started_at and ended_at:
+        elapsed_ms = round((float(ended_at) - float(started_at)) * 1000, 1)
+    pipeline = str(start_payload.get("pipeline") or "") or (
+        "rla-phases" if handle.engine == "rla" else "fods-scheduler"
+    )
+    unavailable = (
+        finish_payload.get("unavailable_sources")
+        or finish_payload.get("failed_sources")
+        or []
+    )
     return {
         "run_id": handle.run_id,
         "engine": handle.engine,
@@ -922,6 +1069,14 @@ def _handle_info(handle: RunHandle) -> dict[str, Any]:
         "source_run_id": handle.source_run_id or None,
         "topic": handle.topic,
         "status": handle.status,
+        "status_reason": str(finish_payload.get("termination_reason") or ""),
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "elapsed_ms": elapsed_ms,
+        "pipeline": pipeline,
+        "unavailable_sources": [str(item) for item in unavailable]
+        if isinstance(unavailable, list)
+        else [],
         "event_count": len(handle.events),
         "error": handle.error,
         "output_path": handle.output_path,

@@ -644,6 +644,8 @@ async def _execute(
         "run_started",
         "FODS research run started",
         run_id=run_id,
+        engine="fods",
+        pipeline="fods-scheduler",
         mode=mode,
         planner=planner_mode,
         schedule=schedule,

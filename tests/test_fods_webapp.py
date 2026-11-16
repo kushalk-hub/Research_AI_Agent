@@ -11,8 +11,17 @@ import pytest
 from pydantic import ValidationError
 
 from fods.events import EventLog
-from fods.webapp import BudgetOverrideRequired, NewRun, RunHandle, RunManager, make_server
+from fods.webapp import (
+    BudgetOverrideRequired,
+    NewRun,
+    RunHandle,
+    RunManager,
+    _handle_info,
+    _rla_stages,
+    make_server,
+)
 from rla.config import Settings
+from rla.events import PIPELINE_PHASES
 
 
 def _settings(tmp_path):
@@ -435,3 +444,267 @@ def test_api_invalid_citation_records_failed_gate_and_does_not_create_brief(tmp_
     assert validation["payload"]["recovery_action"] == "block_output_write"
     assert not any(event["kind"] == "brief_saved" for event in handle.events)
     assert not (manager.briefs_dir / f"{handle.run_id}.md").exists()
+
+
+def test_handle_info_reports_authoritative_status_timing_and_pipeline():
+    handle = RunHandle("0123456789ab", "simulate", "Timed run", "briefs/x.md")
+    handle.events = [
+        {
+            "seq": 1,
+            "kind": "run_started",
+            "message": "started",
+            "payload": {"engine": "fods", "pipeline": "fods-scheduler"},
+            "timestamp": 100.0,
+        },
+        {
+            "seq": 2,
+            "kind": "run_finished",
+            "message": "finished",
+            "payload": {
+                "succeeded": True,
+                "termination_reason": "completed_with_partial_sources",
+                "elapsed_ms": 12.5,
+                "unavailable_sources": ["crossref"],
+            },
+            "timestamp": 112.5,
+        },
+    ]
+    handle.status = "partial"
+
+    info = _handle_info(handle)
+
+    assert info["status"] == "partial"
+    assert info["status_reason"] == "completed_with_partial_sources"
+    assert info["pipeline"] == "fods-scheduler"
+    assert info["started_at"] == 100.0
+    assert info["ended_at"] == 112.5
+    assert info["elapsed_ms"] == 12.5
+    assert info["unavailable_sources"] == ["crossref"]
+    assert info["event_count"] == 2
+
+    # The RLA pipeline records the same fact as `failed_sources`.
+    handle.events[1]["payload"].pop("unavailable_sources")
+    handle.events[1]["payload"]["failed_sources"] = ["semantic_scholar"]
+    assert _handle_info(handle)["unavailable_sources"] == ["semantic_scholar"]
+
+
+def test_handle_info_derives_elapsed_from_timestamps_when_absent():
+    handle = RunHandle("0123456789ab", "simulate", "Old log")
+    handle.events = [
+        {"seq": 1, "kind": "run_started", "message": "s", "payload": {}, "timestamp": 10.0},
+        {"seq": 2, "kind": "run_finished", "message": "f", "payload": {}, "timestamp": 10.25},
+    ]
+    handle.status = "completed"
+
+    info = _handle_info(handle)
+
+    assert info["status_reason"] == ""
+    assert info["elapsed_ms"] == 250.0
+    # No pipeline recorded in this old log: the engine decides the label.
+    assert info["pipeline"] == "fods-scheduler"
+    assert info["unavailable_sources"] == []
+
+
+def test_replay_keeps_replayed_status_and_reports_why_it_ended(tmp_path, monkeypatch):
+    manager = RunManager(_settings(tmp_path))
+    manager.runs_dir.mkdir(parents=True, exist_ok=True)
+    events = [
+        {"seq": 1, "kind": "run_started", "message": "started", "payload": {}, "timestamp": 1.0},
+        {
+            "seq": 2,
+            "kind": "run_finished",
+            "message": "finished",
+            "payload": {"succeeded": False, "termination_reason": "plan_rejected"},
+            "timestamp": 1.5,
+        },
+    ]
+    (manager.runs_dir / "0123456789ab.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8"
+    )
+    monkeypatch.setattr("fods.cli._execute", lambda *_a, **_k: None, raising=False)
+
+    replay = manager.replay("0123456789ab", speed_ms=0)
+    deadline = time.monotonic() + 2
+    while not replay.finished and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    info = _handle_info(replay)
+    assert info["status"] == "replayed"
+    assert info["status_reason"] == "plan_rejected"
+
+
+def test_brief_is_served_as_markdown_json_and_download(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    manager.runs_dir.mkdir(parents=True, exist_ok=True)
+    manager.briefs_dir.mkdir(parents=True, exist_ok=True)
+    run_id = "0123456789ab"
+    brief_path = manager.briefs_dir / f"{run_id}.md"
+    brief_path.write_text("# Brief\n\nCited answer.\n", encoding="utf-8")
+    events = [
+        {"seq": 1, "kind": "run_started", "message": "started", "payload": {}, "timestamp": 1.0},
+        {
+            "seq": 2,
+            "kind": "context_ready",
+            "message": "context",
+            "payload": {"source_names": ["arxiv", "dblp"]},
+            "timestamp": 2.0,
+        },
+        {
+            "seq": 3,
+            "kind": "answer_ready",
+            "message": "answer",
+            "payload": {"citations": ["[1]"], "answer": "text"},
+            "timestamp": 3.0,
+        },
+        {
+            "seq": 4,
+            "kind": "brief_saved",
+            "message": "saved",
+            "payload": {"path": str(brief_path)},
+            "timestamp": 4.0,
+        },
+    ]
+    (manager.runs_dir / f"{run_id}.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8"
+    )
+    server, _mgr = make_server("127.0.0.1", 0, manager)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with urlopen(base + f"/api/runs/{run_id}/brief") as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"].startswith("text/markdown")
+            assert response.headers.get("Content-Disposition") is None
+            assert response.read().decode("utf-8") == "# Brief\n\nCited answer.\n"
+
+        with urlopen(base + f"/api/runs/{run_id}/brief?download=1") as response:
+            assert (
+                response.headers["Content-Disposition"]
+                == f'attachment; filename="{run_id}.md"'
+            )
+            assert response.read().decode("utf-8").startswith("# Brief")
+
+        with urlopen(base + f"/api/runs/{run_id}/brief?format=json") as response:
+            document = json.loads(response.read())
+        assert document["run_id"] == run_id
+        assert document["markdown"].startswith("# Brief")
+        assert document["citations"] == ["[1]"]
+        assert document["sources"] == ["arxiv", "dblp"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_brief_404s_with_a_code_when_no_brief_was_saved(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    manager.runs_dir.mkdir(parents=True, exist_ok=True)
+    run_id = "0123456789ab"
+    (manager.runs_dir / f"{run_id}.jsonl").write_text(
+        json.dumps({"seq": 1, "kind": "run_started", "message": "s", "payload": {}}) + "\n",
+        encoding="utf-8",
+    )
+    server, _mgr = make_server("127.0.0.1", 0, manager)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with pytest.raises(HTTPError) as raised:
+            urlopen(base + f"/api/runs/{run_id}/brief", timeout=5)
+        assert raised.value.code == 404
+        assert json.loads(raised.value.read())["code"] == "not_found"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_stream_envelope_carries_status_and_reason(tmp_path):
+    server, _mgr = make_server("127.0.0.1", 0, RunManager(_settings(tmp_path)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    request = Request(
+        base + "/api/runs",
+        data=json.dumps(
+            {
+                "topic": "SSE status",
+                "question": "Does the stream state how the run ended?",
+                "mode": "simulate",
+                "planner": "fixture",
+                "delay_ms": 0,
+            }
+        ).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=5) as response:
+            started = json.loads(response.read())
+
+        envelopes = []
+        with urlopen(base + started["events_url"], timeout=10) as response:
+            for line in response:
+                if not line.startswith(b"data: "):
+                    continue
+                envelope = json.loads(line[6:])
+                envelopes.append(envelope)
+                if envelope["event"]["kind"] == "run_finished":
+                    break
+
+        assert envelopes, "no streamed envelopes"
+        for envelope in envelopes:
+            assert "status" in envelope
+            assert "status_reason" in envelope
+        first = envelopes[0]["event"]
+        assert first["kind"] == "run_started"
+        assert first["payload"]["engine"] == "fods"
+        assert first["payload"]["pipeline"] == "fods-scheduler"
+        assert first["summary"] and len(first["summary"]) <= 90
+        assert first["class"] == "runtime"
+        assert "event_class" not in first
+        final = envelopes[-1]
+        assert final["status"] == "completed"
+        assert final["status_reason"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_rla_stage_rail_is_the_ordered_pipeline():
+    stages = _rla_stages()
+
+    assert [stage["id"] for stage in stages] == [str(phase) for phase in PIPELINE_PHASES]
+    assert [stage["order"] for stage in stages] == list(range(len(PIPELINE_PHASES)))
+    assert all(stage["label"] and stage["label"][0].isupper() for stage in stages)
+    assert {"search", "fetch", "fulltext", "extract", "answer", "done"} <= {
+        stage["id"] for stage in stages
+    }
+
+
+def test_invalid_run_request_returns_a_code_and_field_errors(tmp_path):
+    server, _mgr = make_server("127.0.0.1", 0, RunManager(_settings(tmp_path)))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    request = Request(
+        base + "/api/runs",
+        data=json.dumps(
+            {"topic": "Bounds", "question": "Is this rejected?", "concurrency": 99}
+        ).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with pytest.raises(HTTPError) as raised:
+            urlopen(request, timeout=5)
+        assert raised.value.code == 400
+        payload = json.loads(raised.value.read())
+        assert payload["code"] == "validation"
+        assert any(error["loc"][-1] == "concurrency" for error in payload["fields"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

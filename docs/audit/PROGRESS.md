@@ -14,7 +14,7 @@ This file is the durable memory of the work. Update after every slice.
 | 3 | `vitest`, `@testing-library/react`, `jsdom` pinned; Playwright dev-only via `npm run test:e2e`, never in Docker | done (slice 1; exact pins, licence-clean) |
 | 4 | RLA cooperative cancel, minimal diff; stop and ask if invasive | planned (slice 4) |
 | 5 | Budget = configured cap verbatim + explicit override, enforced server-side with `fields` + stable `code`; remove `webapp.py:57` default of 100 | **done** (`8cd8af1` + slice 2; server returns `code=budget_override_required`, composer states the cap and needs a tick) |
-| 6 | Backend one-liners + single `describeEvent()` fallback; redacted, ≤90 chars, no raw JSON/paths | planned (slice 3a + 7) |
+| 6 | Backend one-liners + single `describeEvent()` fallback; redacted, ≤90 chars, no raw JSON/paths | **done backend** (`fods/event_meta.py`; frontend fallback is slice 7) |
 | 7 | Delete legacy shell only in slice 9, after green behavioural tests; keep `tests/fixtures/fods_frontend/demo_data.json` | planned (slice 9) |
 | 8 | Copy Docker files; add `RLA_FODS_ALLOW_GEMINI`; run real build or write NOT VERIFIED | planned (slice 9) |
 | A | `abstained`: no new abstention logic; remove from enum/docs unless the answer stage already exposes a flag | **answered:** no flag exists anywhere in `src/` (only the prompt line `tools.py:298`) → removed from the UI enum, no badge, docs unchanged because they never listed it |
@@ -33,7 +33,7 @@ This file is the durable memory of the work. Update after every slice.
 | 1 | Foundation: tokens, theme, shell (sidebar/thread/composer), store, SSE manager | **done, accepted** | `dcad428` | pytest 809+1 · ruff clean · build green · vitest 43 · Playwright 2 | reviewed |
 | 1.1 | Owner review fixes: neutral copy, footer, shared column, e2e isolation, contrast, 768 layout, N-shortcut, recents, CSP assertion | **done** | `fix(ui)` commit | pytest 813+1 · ruff clean · build green · vitest 83 · Playwright 4 | — |
 | 2 | Composer `+` menu, mode, config, advanced validation, budget | **done** | `feat(ui)` commit | pytest 817+1 · ruff clean · build 24.15 kB css / 275.99 kB js · vitest 112 · Playwright 5 | — |
-| 3a | Backend for UI: enrichment, `pipeline`, status, terminal guarantee, brief JSON, codes | planned | — | |
+| 3a | Backend for UI: enrichment, `pipeline`, status, terminal guarantee, brief JSON, codes | **done** | `feat(backend)` commit | pytest 838+1 · ruff clean · replay of the golden log byte-identical | - |
 | 3b | Backend hardening: A-02, A-03, A-07, A-08, A-09, A-11 | planned | — | |
 | 4 | Thread lifecycle: working lines, chip, New investigation, Stop | planned | — | |
 | 5 | Answer + evidence: citation chips, scroll, `[C#]` | planned | — | |
@@ -179,6 +179,70 @@ mode); Playwright **5 passed (3.2s)**. Screenshot run: `consoleErrors: []`,
 **Evidence:** `docs/audit/screenshots/slice2-menu-{1280,768}.png`,
 `slice2-menu-advanced-1280.png`, `slice2-menu-advanced-light-1280.png`; the four slice-1.1
 screenshots were regenerated because the composer gained the `+` trigger.
+
+## Slice 3a detail (backend for the UI)
+
+**Files.** New `src/fods/event_meta.py`; `src/fods/events.py`; `src/fods/runtime.py`;
+`src/fods/cli.py`; `src/fods/webapp.py`; new `tests/test_fods_event_meta.py`; additions to
+`tests/test_fods_runtime.py` and `tests/test_fods_webapp.py`.
+
+1. **One derivation, written at emit time.** `event_meta.describe(kind, message, payload)`
+   returns `summary`, `phase`, `event_class`, `severity`, `duration_ms`. `EventLog.emit()`
+   calls it, so every new event is displayable from the record alone. `RuntimeEvent` keeps the
+   attribute `event_class` because `class` is a Python keyword; `to_dict()` writes the wire key
+   **`class`** and never `event_class`. The module is named `event_meta`, not `enrichment`,
+   because the repo already has paper-concept "enrichment" (`tests/test_fods_enrichment.py`,
+   tool `extract_enrichment_batch`).
+2. **Phase comes from the record, never from `kind` alone.** RLA uses `payload.phase`; FODS
+   derives it from the task's tool (`search_*`/`acquisition_checkpoint` → acquire,
+   `merge_and_save_context` → merge, `retrieve_evidence` → evidence, `draft_cited_answer` →
+   answer, `validate_citations` → validate, `write_cited_brief` → write), with plan/queue/
+   runtime bookkeeping classes. Summaries are one line, ≤90 chars, no raw JSON; counts are
+   taken from the payload (`plan validated — 8 tasks, 6 levels`).
+3. **Terminal-event guarantee (A-01).** `_guarantees_terminal_event` wraps `run_plan` and, in
+   `finally`, emits exactly one `run_finished` only if the body did not. Today the only gap was
+   `plan_rejected`; a normal run still emits its own single terminal event. Two tests pin both
+   directions (rejected plan → one `run_finished` with `termination_reason=plan_rejected`;
+   completed run → exactly one).
+4. **Authoritative run info (UI-08, A-01, A-04).** `GET /api/runs/<id>` now returns
+   `status`, `status_reason` (the recorded `termination_reason`), `started_at`, `ended_at`,
+   `elapsed_ms` (recorded, else derived from the two timestamps), `pipeline`, and
+   `unavailable_sources`. `handle.status` is preserved, so a replayed run still reports
+   `replayed` while `status_reason` says why the original run ended.
+5. **Status without polling (UI-08).** The SSE envelope carries `status` and `status_reason`.
+   The handle's own status is set *after* the terminal event is published, so the terminal
+   envelope derives its status from the recorded `run_finished` instead of echoing a stale
+   `starting`; replays report `replayed`.
+6. **RLA durations and failures (UI-11, A-04).** `run_started` carries
+   `pipeline="rla-phases"` and `pipeline_stages` (the ten `PIPELINE_PHASES` with labels and
+   order); `run_finished` carries the real `elapsed_ms`, `failed_sources` names and
+   `stages: [{id, started_ms, duration_ms}]` computed from the recorded progress events. A
+   phase with no progress event is absent, never shown as zero. FODS `run_started` carries
+   `engine="fods"`, `pipeline="fods-scheduler"`.
+7. **Brief machine-readable + download (UI-09).** `GET /api/runs/<id>/brief` is unchanged
+   Markdown; `?format=json` returns `{run_id, markdown, citations, sources}` (sources read
+   from the recorded `context_ready`/`research_papers`); `?download=1` adds
+   `Content-Disposition: attachment; filename="<run_id>.md"`. A missing brief is
+   `404 {code: "not_found"}`.
+8. **Stable error codes (A-12 groundwork).** POST errors now carry `code`: `validation`
+   (pydantic, with `fields`), `budget_override_required` (with `fields`), `invalid_request`,
+   `conflict`, `not_found`.
+
+**Slice 3a gate (measured, this worktree):** pytest `838 passed, 1 skipped in 255.27s` (was
+817+1; +21: 11 event-meta, 2 terminal-guarantee, 8 webapp); `ruff check src/ tests/` all checks
+passed; vite build unchanged at 24.15 kB css / 275.99 kB js (no frontend source touched);
+vitest `112 passed in 11 files`; Playwright `5 passed (5.1s)`. Screenshot run not repeated: the
+bundle hash is identical to slice 2. `data/` untouched (89 runs, `git status` clean).
+
+**Parity evidence.** All three golden fixtures describe cleanly (114 / 55 / 381 events), and
+all **89 real logs (10,439 events)** produce a non-empty summary ≤90 chars with no path-like
+text. Replaying `17ee03228c0b` through `RunManager` gives **114/114 byte-identical events**, no
+invented `summary`/`phase`/`class` on old records, `status="replayed"`,
+`status_reason="completed"`, `elapsed_ms` derived from the recorded timestamps.
+
+**Not verified here.** Docker on 8765 is not running on this machine, so the container's old
+UI was not re-checked; slice 9 rebuilds it. `src/fods/web/` is untouched and its `dist/` is
+gitignored.
 
 ## Blockers / notes
 
