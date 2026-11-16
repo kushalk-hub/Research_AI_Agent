@@ -1,0 +1,162 @@
+/* Design tokens. Every colour, space, radius, type size and duration in the app
+   comes from here; no component invents its own values. */
+
+:root {
+  color-scheme: light;
+
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-reading: ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+
+  /* 4px space scale */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 48px;
+  --sp-10: 64px;
+
+  --r-1: 6px;
+  --r-2: 10px;
+  --r-3: 14px;
+  --r-pill: 999px;
+
+  --fs-1: 12px;
+  --fs-2: 13px;
+  --fs-3: 14px;
+  --fs-4: 16px;
+  --fs-5: 20px;
+  --fs-6: 24px;
+  --fs-7: 32px;
+
+  --lh-1: 16px;
+  --lh-2: 20px;
+  --lh-3: 22px;
+  --lh-4: 24px;
+  --lh-5: 28px;
+  --lh-6: 32px;
+  --lh-7: 40px;
+
+  --t-fast: 120ms;
+  --t-base: 180ms;
+  --t-slow: 240ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --elev-2: 0 8px 24px rgba(0, 0, 0, 0.1);
+
+  --sidebar-w: 280px;
+  --sidebar-w-rail: 64px;
+  --content-max: 880px;
+  --row-h: 32px;
+
+  --focus-ring: 2px solid var(--accent);
+}
+
+/* Light theme */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f7f8f7;
+  --surface: #ffffff;
+  --surface-2: #f1f3f2;
+  --surface-3: #e9eceb;
+  --ink: #14181a;
+  --muted: #5c6a6f;
+  --line: #e3e7e6;
+  --line-strong: #cdd4d2;
+  --accent: #0f6b5f;
+  --accent-ink: #ffffff;
+  --accent-weak: #e4f1ee;
+  --ok: #1e7a4b;
+  --ok-weak: #e6f4ec;
+  --warn: #a85a00;
+  --warn-weak: #fdf1e2;
+  --err: #b4232f;
+  --err-weak: #fcebeb;
+  --blocked: #6b5d7a;
+  --blocked-weak: #f1edf5;
+  --queued: #7a8285;
+  --queued-weak: #f0f2f2;
+  --overlay: rgba(16, 20, 19, 0.32);
+}
+
+/* Dark theme — a full palette, not an inversion */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #101413;
+  --surface: #171c1b;
+  --surface-2: #1e2523;
+  --surface-3: #26302d;
+  --ink: #e8edeb;
+  --muted: #9aa5a3;
+  --line: #28302e;
+  --line-strong: #37423f;
+  --accent: #4fb3a3;
+  --accent-ink: #062a25;
+  --accent-weak: #15322d;
+  --ok: #57c08a;
+  --ok-weak: #12301f;
+  --warn: #e4a24c;
+  --warn-weak: #33240f;
+  --err: #f07a82;
+  --err-weak: #3a181b;
+  --blocked: #b9a7cc;
+  --blocked-weak: #2a2333;
+  --queued: #8c9491;
+  --queued-weak: #232a28;
+  --overlay: rgba(0, 0, 0, 0.55);
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elev-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* System preference, when the user has not chosen a theme explicitly */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #101413;
+    --surface: #171c1b;
+    --surface-2: #1e2523;
+    --surface-3: #26302d;
+    --ink: #e8edeb;
+    --muted: #9aa5a3;
+    --line: #28302e;
+    --line-strong: #37423f;
+    --accent: #4fb3a3;
+    --accent-ink: #062a25;
+    --accent-weak: #15322d;
+    --ok: #57c08a;
+    --ok-weak: #12301f;
+    --warn: #e4a24c;
+    --warn-weak: #33240f;
+    --err: #f07a82;
+    --err-weak: #3a181b;
+    --blocked: #b9a7cc;
+    --blocked-weak: #2a2333;
+    --queued: #8c9491;
+    --queued-weak: #232a28;
+    --overlay: rgba(0, 0, 0, 0.55);
+    --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --elev-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0.01ms;
+    --t-base: 0.01ms;
+    --t-slow: 0.01ms;
+  }
+}
+
+/* One frame after a theme change: no colour cross-fade, because a transitioning
+   background against an already-changed text colour is briefly unreadable. */
+html[data-theme-switching] *,
+html[data-theme-switching] *::before,
+html[data-theme-switching] *::after {
+  transition: none !important;
+}

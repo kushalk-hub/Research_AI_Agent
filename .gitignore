@@ -21,3 +21,5 @@ dist/
 build/
 .env
 .pytest-tmp/
+test-results/
+playwright-report/

@@ -326,7 +326,13 @@ produce tool-call durations).
 | 9 | Brief JSON + download | `GET /api/runs/<id>/brief?format=json` → `{run_id, markdown, citations, sources}`; `?download=1` → `Content-Disposition: attachment` | UI-10 |
 | 10 | Cancel for RLA | cooperative check between pipeline items → `run_finished(termination_reason="cancelled")` | A-10 |
 | 11 | Validation shape | keep `fields`; add stable `code` strings per error | UI-04, A-12 |
-| 12 | Path hygiene | workspace-absolute paths in `stage_payload` relativised before emit | A-11 |
+| 12 | Path hygiene | workspace-absolute paths relativised before emit **and** one shared sanitiser at the serve layer (SSE, history, brief, replay). Old logs replay with identical semantics; only path redaction differs | A-11 |
+| 13 | Stream fallback + handle lifetime | `/api/runs/<id>/events` streams from disk when no live handle exists; `retry: 3000`; finished handles are evicted | A-02 |
+| 14 | Capability discovery | `/api/config.capabilities.ollama_planner`; the UI disables FODS-live with a stated reason when `false` | A-03 |
+| 15 | Honest citation flag | `citations_validated = not stripped_citations`; neutral "N selected" badge | A-07 |
+| 16 | Brief robustness | try/except around the brief read, 2 MiB cap | A-08 |
+| 17 | Tolerant log reads + cached history | `read_events` skips corrupt lines; history index cached by path/mtime/size | A-09 |
+| 18 | Request origin guard | Origin and Host checks; loopback allow-list plus an env var for the Vite dev origin | A-11 |
 
 Example of the additive change, verified against a real event:
 
@@ -376,7 +382,7 @@ Checks after **every** slice: `python -m pytest tests/ -q`, `python -m ruff chec
 |---|---|---|---|
 | 1 | Foundation: tokens, theme (light/dark), app shell (sidebar + thread + composer), API client, store with single `activeRunId`, one SSE manager | UI-01, UI-03 | first paint = sidebar + prompt + composer; one nav; one stream; build green |
 | 2 | Composer `+` menu: mode, config, advanced with validation, mode chip | UI-02, UI-04, A-06 | no config card on the page; invalid input blocked inline; server `fields` rendered |
-| 3 | Backend: enrichment, status/`status_reason`, terminal-event guarantee, brief JSON, path hygiene, Origin guard | UI-08 groundwork, UI-11 support, A-01, A-04, A-08, A-11 | `GET /api/runs/<id>` reports real status; old logs replay byte-identically |
+| 3 | Backend: enrichment, status/`status_reason`, terminal-event guarantee, brief JSON, path hygiene, Origin guard | UI-08 groundwork, UI-11 support, A-01, A-04, A-08, A-11 | `GET /api/runs/<id>` reports real status; old logs replay with identical semantics (only path redaction differs) |
 | 4 | Thread + lifecycle: working lines, collapse to "Worked for…", answer card, chip, New investigation, Stop | UI-05, UI-08, A-10 | chip never stale; New investigation test passes; Stop honest per mode |
 | 5 | Answer + evidence: citation chips, two-way highlight, scroll-into-view, `[C#]` | UI-09, A-07 | every `[P#]`/`[C#]` resolves, including the last card |
 | 6 | Brief overlay: rendered Markdown, copy/download, sanitised | UI-10 | no new tab; XSS test passes |

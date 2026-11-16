@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -81,24 +82,40 @@ console.log(JSON.stringify({
     assert (actual["next"], actual["previous"], actual["reset"]) == (7, 6, 0)
 
 
-def test_frontend_source_exposes_react_views_and_event_backed_runtime():
+def test_frontend_shell_is_a_module_entry_without_the_legacy_classic_script():
     frontend = ROOT / "stitch_aesthetic_markdown_reader"
     page = (frontend / "index.html").read_text(encoding="utf-8")
     app = (frontend / "src" / "main.jsx").read_text(encoding="utf-8")
-    styles = (frontend / "src" / "styles.css").read_text(encoding="utf-8")
 
     assert '<div id="root"></div>' in page
-    assert 'src="/shell-core.js"' in page
     assert 'src="/src/main.jsx"' in page
-    for view in ("Execution Trace", "FODS Lab", "Library"):
-        assert view in app
-    for event in ("context_ready", "evidence_selected", "answer_ready", "citation_validation"):
-        assert event in app
-    assert "reuse_context" in app
-    assert "graphLayout(tasks)" in app
-    assert "deriveSnapshot" in app
-    assert "prefers-reduced-motion" in styles
-    assert "example.org" not in app
+    assert 'type="module"' in page
+    assert "shell-core.js" not in page
+    assert "StoreProvider" in app
+    assert "createRoot" in app
+    # The served build sends `style-src 'self'`; inline style would be blocked.
+    assert "<style" not in page.lower()
+    assert not re.search(r"\sstyle=", page)
+
+
+def test_frontend_source_avoids_csp_unsafe_and_remote_constructs():
+    root = ROOT / "stitch_aesthetic_markdown_reader" / "src"
+    files = sorted([*(root.rglob("*.js")), *(root.rglob("*.jsx")), *(root.rglob("*.css"))])
+    assert files, "frontend sources must exist"
+
+    for path in files:
+        content = path.read_text(encoding="utf-8")
+        assert "dangerouslySetInnerHTML" not in content, path
+        assert 'setAttribute("style"' not in content, path
+        assert "setAttribute('style'" not in content, path
+        assert "@import url(http" not in content, path
+        assert "fonts.googleapis" not in content, path
+        assert "fonts.gstatic" not in content, path
+        assert "cdn.jsdelivr" not in content, path
+        assert "unpkg.com" not in content, path
+        if path.suffix in {".js", ".jsx"}:
+            # React turns style={{...}} into a style attribute, which the CSP blocks.
+            assert not re.search(r"style=\{\{", content), path
 
 
 @pytest.mark.skipif(
