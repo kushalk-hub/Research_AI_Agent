@@ -54,7 +54,12 @@ class NewRun(BaseModel):
     delay_ms: int = Field(default=150, ge=0, le=5000)
     paper_limit: int = Field(default=MAX_LIVE_PAPER_LIMIT, ge=2, le=MAX_LIVE_PAPER_LIMIT)
     provider_wait_seconds: float = Field(default=300.0, ge=0, le=3600)
-    llm_request_budget: int = Field(default=100, ge=1, le=1000)
+    #: None means "use the configured daily cap" (settings.llm_daily_budget).
+    #: The server used to default this to 100 independently of the operator's
+    #: configured 15, which silently overrode the cap (A-06).
+    llm_request_budget: int | None = Field(default=None, ge=1, le=1000)
+    #: An explicit opt-in is required to exceed the configured cap for one run.
+    allow_budget_override: bool = False
 
     @field_validator("topic", "question")
     @classmethod
@@ -78,6 +83,31 @@ class NewRun(BaseModel):
         if value and not re.fullmatch(r"[a-f0-9]{32}", value):
             raise ValueError("context_id must be a 32-character snapshot hash")
         return value
+
+
+class BudgetOverrideRequired(ValueError):
+    """The request asks for more model calls than the operator configured.
+
+    Carries stable machine-readable fields so the client can render the message
+    next to the budget input (A-06) instead of guessing from a prose error.
+    """
+
+    code = "budget_override_required"
+
+    def __init__(self, requested: int, configured: int) -> None:
+        super().__init__(
+            f"{requested} model requests exceeds the configured daily cap of {configured}; "
+            "set allow_budget_override to raise it for this run"
+        )
+        self.requested = requested
+        self.configured = configured
+        self.fields = [
+            {
+                "loc": ("body", "llm_request_budget"),
+                "msg": f"above the configured daily cap of {configured}",
+                "type": "value_error",
+            }
+        ]
 
 
 @dataclass
@@ -145,7 +175,57 @@ class RunManager:
             "llm_request_budget": settings.llm_daily_budget,
             "source_quorum": 2,
             "modes": ["live", "simulate", "replay"],
+            # Bounds for the composer's inline validator. They mirror NewRun and
+            # are exposed so the UI does not have to hardcode a second copy.
+            "limits": {
+                "topic_min": 3,
+                "topic_max": 300,
+                "question_min": 3,
+                "question_max": 1000,
+                "paper_limit_min": 2,
+                "paper_limit_max": MAX_LIVE_PAPER_LIMIT,
+                "provider_wait_seconds_min": 0,
+                "provider_wait_seconds_max": 3600,
+                "llm_request_budget_min": 1,
+                "llm_request_budget_max": 1000,
+                "concurrency_min": 1,
+                "concurrency_max": 8,
+                "source_limit_min": 2,
+                "source_limit_max": 5,
+                "delay_ms_min": 0,
+                "delay_ms_max": 5000,
+            },
+            # A capability is a fact the server can check, not a promise about a
+            # remote service. `ollama_planner` is true when the configured
+            # structured-planner provider is Ollama (the webapp's own live gate).
+            "capabilities": {
+                "ollama_planner": models["planner"].split("/", 1)[0] == "ollama",
+                "gemini": bool(settings.gemini_api_key),
+                "gemini_opted_in": os.getenv("RLA_FODS_ALLOW_GEMINI") == "1",
+                # Live research needs an Ollama planner and a usable answer
+                # provider: either a Gemini key or a non-Gemini local model.
+                "rla_live": models["planner"].split("/", 1)[0] == "ollama"
+                and (
+                    bool(settings.gemini_api_key)
+                    or models["answer"].split("/", 1)[0] != "gemini"
+                ),
+            },
         }
+
+    def _effective_budget(self, request: NewRun) -> int:
+        """Resolve the run's model-call cap against the operator's setting.
+
+        Omitting the field uses the configured cap verbatim. Raising it above
+        that cap requires an explicit, per-run opt-in; otherwise the request is
+        rejected with a field error the UI can render next to the input (A-06).
+        """
+        configured = self.settings.llm_daily_budget
+        requested = request.llm_request_budget
+        if requested is None:
+            return configured
+        if requested > configured and not request.allow_budget_override:
+            raise BudgetOverrideRequired(requested, configured)
+        return requested
 
     @staticmethod
     def _output_name(request: NewRun, run_id: str) -> str:
@@ -200,6 +280,7 @@ class RunManager:
             raise ValueError("cycle demonstration requires a new simulated research plan")
         if request.invalid_citation and request.mode != "simulate":
             raise ValueError("invalid-citation demonstration is available only in simulation mode")
+        request = request.model_copy(update={"llm_request_budget": self._effective_budget(request)})
         key = idempotency_key.strip()[:120]
         with self.lock:
             if key and key in self.idempotency:
@@ -529,6 +610,8 @@ class RunManager:
                     "output_path": saved.get("payload", {}).get("path", ""),
                     "models_used": actual_models,
                     "elapsed_ms": finish.get("payload", {}).get("elapsed_ms"),
+                    "started_at": started.get("timestamp"),
+                    "ended_at": finish.get("timestamp"),
                     "event_count": len(events),
                     "visualization_url": f"/api/runs/{path.stem}/visualization",
                 }
@@ -800,6 +883,11 @@ def make_server(host: str = "127.0.0.1", port: int = 8765, manager: RunManager |
                     handle = manager.replay(run_id, max(0, min(speed, 250)))
                     return self._json(202, _handle_info(handle))
                 return self._json(404, {"error": "not found"})
+            except BudgetOverrideRequired as exc:
+                return self._json(
+                    400,
+                    {"error": str(exc), "code": exc.code, "fields": exc.fields},
+                )
             except ValidationError as exc:
                 return self._json(
                     400, {"error": "invalid run request", "fields": exc.errors(include_url=False)}

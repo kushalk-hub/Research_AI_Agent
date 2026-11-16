@@ -4,13 +4,14 @@ import importlib
 import json
 import threading
 import time
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
 from pydantic import ValidationError
 
 from fods.events import EventLog
-from fods.webapp import NewRun, RunHandle, RunManager, make_server
+from fods.webapp import BudgetOverrideRequired, NewRun, RunHandle, RunManager, make_server
 from rla.config import Settings
 
 
@@ -71,6 +72,109 @@ def test_full_literature_pipeline_exposes_bounded_run_settings(tmp_path):
             mode="live",
             llm_request_budget=1001,
         )
+
+
+def test_config_exposes_ui_limits_and_live_capabilities(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    config = manager.config()
+
+    assert config["limits"]["paper_limit_max"] == config["paper_limit_max"]
+    assert config["limits"]["topic_max"] == 300
+    assert config["limits"]["llm_request_budget_max"] == 1000
+    assert config["capabilities"]["ollama_planner"] == (
+        config["providers"]["planner"] == "ollama"
+    )
+    assert config["capabilities"]["gemini"] is True
+    # The test settings configure a Gemini planner, so live research is not
+    # available even though a key exists.
+    assert config["capabilities"]["rla_live"] is False
+
+
+def test_budget_uses_the_configured_cap_and_needs_an_explicit_override(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    configured = manager.settings.llm_daily_budget
+
+    base = NewRun(topic="Budget bounds", question="How many calls may this run make?")
+    assert manager._effective_budget(base) == configured
+    assert manager._effective_budget(
+        base.model_copy(update={"llm_request_budget": configured})
+    ) == configured
+
+    with pytest.raises(BudgetOverrideRequired) as raised:
+        manager._effective_budget(
+            base.model_copy(update={"llm_request_budget": configured + 1})
+        )
+    assert raised.value.code == "budget_override_required"
+    assert raised.value.fields[0]["loc"] == ("body", "llm_request_budget")
+    assert str(configured) in raised.value.fields[0]["msg"]
+
+    override = base.model_copy(
+        update={"llm_request_budget": configured + 1, "allow_budget_override": True}
+    )
+    assert manager._effective_budget(override) == configured + 1
+
+
+def test_api_rejects_budget_above_cap_with_a_code_and_a_field_error(tmp_path):
+    settings = _settings(tmp_path)
+    configured = settings.llm_daily_budget
+    server, _manager = make_server("127.0.0.1", 0, RunManager(settings))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    body = {
+        "topic": "Budget override",
+        "question": "Will this request be rejected before it starts?",
+        "mode": "simulate",
+        "planner": "fixture",
+        "llm_request_budget": configured + 1,
+        "delay_ms": 0,
+    }
+    request = Request(
+        base + "/api/runs",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with pytest.raises(HTTPError) as raised:
+            urlopen(request, timeout=5)
+        assert raised.value.code == 400
+        payload = json.loads(raised.value.read())
+        assert payload["code"] == "budget_override_required"
+        assert payload["fields"][0]["loc"] == ["body", "llm_request_budget"]
+        assert "daily cap" in payload["error"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_history_reports_recorded_start_and_end_timestamps(tmp_path):
+    manager = RunManager(_settings(tmp_path))
+    manager.runs_dir.mkdir(parents=True, exist_ok=True)
+    events = [
+        {
+            "seq": 1,
+            "kind": "run_started",
+            "message": "started",
+            "payload": {"topic": "Timed run", "mode": "simulate"},
+            "timestamp": 1_700_000_000.0,
+        },
+        {
+            "seq": 2,
+            "kind": "run_finished",
+            "message": "finished",
+            "payload": {"succeeded": True, "termination_reason": "completed"},
+            "timestamp": 1_700_000_012.5,
+        },
+    ]
+    path = manager.runs_dir / "0123456789ab.jsonl"
+    path.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+
+    row = manager.history()[0]
+    assert row["run_id"] == "0123456789ab"
+    assert row["started_at"] == 1_700_000_000.0
+    assert row["ended_at"] == 1_700_000_012.5
 
 
 def test_live_web_run_rejects_fixture_planner_instead_of_presenting_it_as_live(tmp_path):
